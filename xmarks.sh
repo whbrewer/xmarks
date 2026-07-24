@@ -2,26 +2,29 @@
 # (Claude Code and Codex CLI).
 # Source from .bashrc:  source ~/.local/bin/xmarks.sh
 #
-#   xs <name> [note...]    star the current/most-recent session here; an
-#                          explicit [note...] always overwrites whatever
-#                          description (auto or previous) was showing
-#   xg [name|hash]         cd to its dir and resume the session (a
-#                          starred name from xl, or any session's HASH
-#                          from xl — no xs needed)
+#   xs [hash] [note...]    star/un-star (toggle). Inside a session, plain
+#                          `xs` stars it, no hash needed. Outside one,
+#                          `xs <hash>` targets any session by its xl HASH;
+#                          a bare `xs` guesses the newest session for
+#                          $PWD instead. Starring an already-starred
+#                          session un-stars it (and clears its note).
+#                          [note...] overwrites the auto summary/detail;
+#                          cleared on un-star.
+#   xg [hash]              cd to its dir and resume the session (any
+#                          session's HASH from xl, starred or not)
 #   xl [-l|--long] [-s|--starred] [pattern]  every session, oldest to
 #                          newest (latest at the bottom); each row's
-#                          HASH is an xg shortcut. Last 20 by default;
-#                          -s limits to starred sessions, a pattern
-#                          filters (either lifts the cap); -l shows a
-#                          git-log-style paragraph per session instead
-#                          of the oneline table
-#   xd <name>              un-star a session (kept in xl, just drops out
-#                          of `xl -s` — nothing is deleted)
+#                          HASH is an xg shortcut, starred rows get a *
+#                          beside it. Last 20 by default; -s limits to
+#                          starred sessions, a pattern filters (either
+#                          lifts the cap); -l shows a git-log-style
+#                          paragraph per session instead of the oneline
+#                          table
 #   xq                     is this session / directory starred?
 #
 # All state lives in one file, ~/.xmarks/sessions.jsonl, one JSON object
 # per session:
-#   {date, session_id, dir, home, tool, reason, summary, detail, starred, name, note}
+#   {date, session_id, dir, home, tool, reason, summary, detail, starred, note}
 # date/reason/summary are auto-tracked by the hooks: the UserPromptSubmit
 # hook seeds a row right after the first prompt (reason "in_progress",
 # summary = that prompt's own text, no LLM call), so a session that dies
@@ -33,11 +36,11 @@
 # (what was done, key decisions, outcome) -- summary stays a short
 # one-liner for the table, detail is only ever shown in `xl -l`'s
 # per-session paragraph view, since it doesn't fit a table row.
-# starred/name/note are only ever set by `xs` and cleared by `xd` (which
-# un-stars rather than deleting the row). note is optional free text
-# that, when given, always wins over detail/summary for display; when
-# absent, listings fall back to detail, then the short auto summary -- so
-# a session never needs a manual description to be meaningfully listed.
+# starred/note are only ever touched by `xs`, which toggles starred and
+# clears note on un-star. note is optional free text that, when given,
+# always wins over detail/summary for display; when absent, listings
+# fall back to detail, then the short auto summary -- so a session never
+# needs a manual description to be meaningfully listed.
 # tool is "claude" or "codex" (default "claude") and home is the
 # CLAUDE_CONFIG_DIR / CODEX_HOME the session lives in, so sessions from
 # different accounts and tools coexist and resume correctly.
@@ -274,12 +277,19 @@ am_first_msg () {
 xs () {
   am_migrate
   local SESSIONS_FILE="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
-  [ -n "$1" ] || { echo "usage: xs <name> [note...]" >&2; return 1; }
-  local name="$1"; shift
+  # A hash prefix naming an existing session, given outside a session, is
+  # consumed as the target; every other argument (in-session always, or
+  # anything left after a hash) is note text.
+  local hash_arg=""
+  if [ -z "$CLAUDE_CODE_SESSION_ID" ] && [ -n "$1" ] && [ -s "$SESSIONS_FILE" ] \
+       && jq -e --arg h "$1" 'select(.session_id | startswith($h))' "$SESSIONS_FILE" >/dev/null 2>&1; then
+    hash_arg="$1"; shift
+  fi
   local note="$*"
   local sid file home tool markdir="$PWD"
   if [ -n "$CLAUDE_CODE_SESSION_ID" ]; then
-    # Running inside a Claude Code session (e.g. via `! xs foo`): no guessing.
+    # Running inside a Claude Code session (e.g. via `! xs`): no guessing,
+    # no hash needed -- always this exact session.
     # (Codex exports no session id to child shells, so no codex equivalent.)
     tool=claude
     sid="$CLAUDE_CODE_SESSION_ID"
@@ -293,6 +303,14 @@ xs () {
       markdir="$(grep -o '"cwd":"[^"]*"' "$file" | head -1 | cut -d'"' -f4)"
       markdir="${markdir:-$PWD}"
     fi
+  elif [ -n "$hash_arg" ]; then
+    # Target an existing session directly by its xl HASH, wherever it
+    # lives -- no cwd guessing needed.
+    local line; line="$(jq -c --arg h "$hash_arg" 'select(.session_id | startswith($h))' "$SESSIONS_FILE" | tail -1)"
+    sid="$(jq -r '.session_id' <<<"$line")"
+    markdir="$(jq -r '.dir' <<<"$line")"
+    home="$(jq -r '.home' <<<"$line")"
+    tool="$(jq -r '.tool // "claude"' <<<"$line")"
   else
     # Newest session for this dir across all claude config dirs + codex homes.
     local d f files=()
@@ -314,66 +332,78 @@ xs () {
       sid="$(basename "$file" .jsonl)"
     fi
   fi
-  # Preserve date/reason/summary from any row the hooks already wrote for
-  # this session -- only starred/name/note/dir/home/tool change here. A
-  # brand-new row (no hook has run yet, or a codex session the hooks never
-  # touch) falls back to the session's first message as its summary.
-  local existing date reason summary
+  # Preserve date/reason/summary/detail from any row the hooks already
+  # wrote for this session -- only starred/note/dir/home/tool change here.
+  # A brand-new row (no hook has run yet, or a codex session the hooks
+  # never touch) falls back to the session's first message as its summary.
+  local existing date reason summary detail starred existing_note
   existing="$([ -f "$SESSIONS_FILE" ] && jq -c --arg s "$sid" 'select(.session_id == $s)' "$SESSIONS_FILE" | tail -1)"
   if [ -n "$existing" ]; then
     date="$(jq -r '.date' <<<"$existing")"
     reason="$(jq -r '.reason // empty' <<<"$existing")"
     summary="$(jq -r '.summary // empty' <<<"$existing")"
+    detail="$(jq -r '.detail // empty' <<<"$existing")"
+    starred="$(jq -r '.starred // false' <<<"$existing")"
+    existing_note="$(jq -r '.note // empty' <<<"$existing")"
   else
     date="$(date '+%F %H:%M')"
     reason=""
     summary="$(am_first_msg "$file")"
+    detail=""
+    starred=false
+    existing_note=""
+  fi
+  # xs toggles: starring an already-starred session un-stars it instead
+  # of needing a separate command; un-starring always clears the note
+  # (matching the old xd's behavior), while (re-)starring keeps whatever
+  # note was already there if none was typed just now.
+  local new_starred=true
+  [ "$starred" = true ] && new_starred=false
+  if [ "$new_starred" = true ]; then
+    [ -n "$note" ] || note="$existing_note"
+  else
+    note=""
   fi
   (
     flock -w 5 200 || true
     {
-      # An explicit `xs` always wins the name -- if some other row already
-      # has it, that row is un-starred (kept, per xd's own convention)
-      # rather than leaving two starred rows sharing one name.
-      [ -f "$SESSIONS_FILE" ] && jq -c --arg s "$sid" --arg n "$name" \
-        'select(.session_id != $s)
-         | if .name == $n then (.starred = false | .name = null | .note = null) else . end' \
-        "$SESSIONS_FILE"
+      [ -f "$SESSIONS_FILE" ] && jq -c --arg s "$sid" 'select(.session_id != $s)' "$SESSIONS_FILE"
       jq -nc --arg date "$date" --arg sid "$sid" --arg dir "$markdir" \
         --arg home "$home" --arg tool "$tool" --arg reason "$reason" --arg summary "$summary" \
-        --arg name "$name" --arg note "$note" \
+        --arg detail "$detail" --argjson starred "$new_starred" --arg note "$note" \
         '{date: $date, session_id: $sid, dir: $dir, home: $home, tool: $tool,
           reason: (if $reason == "" then null else $reason end),
           summary: (if $summary == "" then null else $summary end),
-          starred: true, name: $name,
+          detail: (if $detail == "" then null else $detail end),
+          starred: $starred,
           note: (if $note == "" then null else $note end)}'
     } > "$SESSIONS_FILE.tmp" && mv "$SESSIONS_FILE.tmp" "$SESSIONS_FILE"
   ) 200>"$SESSIONS_FILE.lock"
-  echo "marked '$name' → $sid  [$tool/$(am_account "$home")]  ($markdir)"
+  if [ "$new_starred" = true ]; then
+    echo "starred ${sid:0:6} → $sid  [$tool/$(am_account "$home")]  ($markdir)"
+  else
+    echo "unstarred ${sid:0:6} (session kept — see xl)"
+  fi
 }
 
 xg () {
   am_migrate
   local SESSIONS_FILE="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
   [ -s "$SESSIONS_FILE" ] || { echo "xg: no sessions yet" >&2; return 1; }
-  local name="$1" line
-  if [ -z "$name" ]; then
+  local hash="$1" line
+  if [ -z "$hash" ]; then
     if command -v fzf >/dev/null 2>&1; then
-      line="$(jq -r 'select(.starred == true) | [.name, (.note // .summary // "-"), (.summary // "-")] | @tsv' "$SESSIONS_FILE" \
+      line="$(jq -r 'select(.starred == true) | [(.session_id[0:6]), (.note // .summary // "-"), (.summary // "-")] | @tsv' "$SESSIONS_FILE" \
         | fzf --delimiter='\t' --with-nth=1,2,3)" || return 1
-      name="$(printf '%s' "$line" | cut -f1)"
+      hash="$(printf '%s' "$line" | cut -f1)"
     else
-      xl -s; printf 'usage: xg <name|hash>\n' >&2; return 1
+      xl -s; printf 'usage: xg <hash>\n' >&2; return 1
     fi
   fi
   local dir sid home tool
-  line="$(jq -c --arg n "$name" 'select(.starred == true and .name == $n)' "$SESSIONS_FILE" | tail -1)"
-  if [ -z "$line" ]; then
-    # Not a starred name -- try it as an xl HASH (a session_id prefix), so
-    # sessions never explicitly `xs`'d are still one command to resume.
-    line="$(jq -c --arg h "$name" 'select(.session_id | startswith($h))' "$SESSIONS_FILE" | tail -1)"
-  fi
-  [ -n "$line" ] || { echo "xg: no such mark or session: $name" >&2; return 1; }
+  # Any session's HASH resumes it, starred or not.
+  line="$(jq -c --arg h "$hash" 'select(.session_id | startswith($h))' "$SESSIONS_FILE" | tail -1)"
+  [ -n "$line" ] || { echo "xg: no such session: $hash" >&2; return 1; }
   dir="$(jq -r '.dir' <<<"$line")"
   sid="$(jq -r '.session_id' <<<"$line")"
   home="$(jq -r '.home' <<<"$line")"
@@ -420,7 +450,7 @@ xl () {
   local c_hash="" c_mark="" c_dim="" c_warn="" c_reset=""
   if [ -t 1 ] && [ -z "$NO_COLOR" ]; then
     c_hash=$'\033[33m'   # yellow, like git's commit hash
-    c_mark=$'\033[36m'   # cyan, like a named ref
+    c_mark=$'\033[36m'   # cyan, for the starred indicator
     c_dim=$'\033[2m'
     c_warn=$'\033[1;31m'
     c_reset=$'\033[0m'
@@ -441,20 +471,20 @@ xl () {
   # null, and bash's `read` collapses adjacent tab delimiters (tab counts
   # as IFS whitespace regardless of what IFS is set to) which would
   # silently shift every field after an empty one.
-  local IFS=$'\x1f' date sid dir home reason summary detail note mark tool
+  local IFS=$'\x1f' date sid dir home reason summary detail note starred tool
   if [ "$long" = 1 ]; then
     local first=1
     { printf '%s\n' "$rows" \
     | jq -r '[.date, .session_id, .dir, .home, (.reason // ""), (.summary // ""), (.detail // ""),
-              (.note // ""), (if .starred == true then .name else "" end), (.tool // "")] | join("\u001f")' \
-    | while read -r date sid dir home reason summary detail note mark tool; do
+              (.note // ""), (.starred // false), (.tool // "")] | join("\u001f")' \
+    | while read -r date sid dir home reason summary detail note starred tool; do
         tool="${tool:-claude}"
         [ -n "$home" ] || { [ "$tool" = codex ] && home="$HOME/.codex" || home="$HOME/.claude"; }
         dir="$(am_display_dir "$dir" 1)"
         [ "$first" = 1 ] || printf '\n'
         first=0
         printf '%ssession %s%s\n' "$c_hash" "$sid" "$c_reset"
-        [ -n "$mark" ] && printf 'Mark:    %s%s%s\n' "$c_mark" "$mark" "$c_reset"
+        [ "$starred" = true ] && printf 'Starred: %syes%s\n' "$c_mark" "$c_reset"
         [ "$tool" = codex ] && printf 'Tool:    %s%s%s\n' "$c_dim" "$tool" "$c_reset"
         [ "$reason" = in_progress ] && printf 'Status:  %sin progress%s\n' "$c_warn" "$c_reset"
         printf 'Account: %s\n' "$(am_account "$home")"
@@ -466,25 +496,27 @@ xl () {
     } | am_page
   else
     { { if [ "$show_tool" = 1 ]; then
-          printf 'DATE\tHASH\tMARK\tTOOL\tDIR\tSUMMARY\n'
+          printf 'DATE\tHASH\tTOOL\tDIR\tSUMMARY\n'
         else
-          printf 'DATE\tHASH\tMARK\tDIR\tSUMMARY\n'
+          printf 'DATE\tHASH\tDIR\tSUMMARY\n'
         fi
         local maxlen="${XMARKS_NOTE_MAXLEN:-52}"
         printf '%s\n' "$rows" \
         | jq -r '[.date, .session_id, .dir, .home, (.reason // ""), (.summary // ""), (.note // ""),
-                  (if .starred == true then .name else "-" end), (.tool // "")] | join("\u001f")' \
-        | while read -r date sid dir home reason summary note mark tool; do
+                  (.starred // false), (.tool // "")] | join("\u001f")' \
+        | while read -r date sid dir home reason summary note starred tool; do
             dir="$(am_display_dir "$dir" 0)"
             local shown="${note:-$summary}"; shown="${shown:--}"
+            # Starred rows get a * beside the hash, in the same color the
+            # old MARK column used, instead of a separate column.
+            local hashfield="${c_hash}${sid:0:6}${c_reset}"
+            [ "$starred" = true ] && hashfield="${hashfield}${c_mark}*${c_reset}"
             if [ "$show_tool" = 1 ]; then
-              printf '%s\t%s%s%s\t%s%s%s\t%s\t%s\t%s\n' \
-                "$date" "$c_hash" "${sid:0:6}" "$c_reset" "$c_mark" "$mark" "$c_reset" \
-                "${tool:-claude}" "$dir" "$(am_truncate "$shown" "$maxlen")"
+              printf '%s\t%s\t%s\t%s\t%s\n' \
+                "$date" "$hashfield" "${tool:-claude}" "$dir" "$(am_truncate "$shown" "$maxlen")"
             else
-              printf '%s\t%s%s%s\t%s%s%s\t%s\t%s\n' \
-                "$date" "$c_hash" "${sid:0:6}" "$c_reset" "$c_mark" "$mark" "$c_reset" \
-                "$dir" "$(am_truncate "$shown" "$maxlen")"
+              printf '%s\t%s\t%s\t%s\n' \
+                "$date" "$hashfield" "$dir" "$(am_truncate "$shown" "$maxlen")"
             fi
           done
       # -c 1000: column -t silently drops trailing columns that don't fit
@@ -503,64 +535,40 @@ xq () {
   local hits
   if [ -n "$CLAUDE_CODE_SESSION_ID" ]; then
     hits="$(jq -r --arg s "$CLAUDE_CODE_SESSION_ID" \
-      'select(.session_id == $s and .starred == true) | "  " + .name + "  (" + (.note // .summary // "-") + ")"' \
+      'select(.session_id == $s and .starred == true) | "  " + .session_id[0:6] + "  (" + (.note // .summary // "-") + ")"' \
       "$SESSIONS_FILE" 2>/dev/null)"
     if [ -n "$hits" ]; then
-      echo "this session is marked:"; printf '%s\n' "$hits"
+      echo "this session is starred:"; printf '%s\n' "$hits"
     else
-      echo "this session is NOT marked — save it with: xs <name> [note...]"
+      echo "this session is NOT starred — star it with: xs [note...]"
       return 1
     fi
   else
     hits="$(jq -r --arg d "$PWD" \
-      'select(.dir == $d and .starred == true) | "  " + .name + "  (" + (.note // .summary // "-") + ")"' \
+      'select(.dir == $d and .starred == true) | "  " + .session_id[0:6] + "  (" + (.note // .summary // "-") + ")"' \
       "$SESSIONS_FILE" 2>/dev/null)"
     if [ -n "$hits" ]; then
-      echo "marks for $PWD:"; printf '%s\n' "$hits"
+      echo "starred sessions for $PWD:"; printf '%s\n' "$hits"
     else
-      echo "no marks for $PWD"
+      echo "no starred sessions for $PWD"
       return 1
     fi
   fi
 }
 
-xd () {
-  am_migrate
-  local SESSIONS_FILE="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
-  [ -n "$1" ] || { echo "usage: xd <name>" >&2; return 1; }
-  [ -s "$SESSIONS_FILE" ] || { echo "xd: no marks yet" >&2; return 1; }
-  jq -e --arg n "$1" 'select(.starred == true and .name == $n)' "$SESSIONS_FILE" >/dev/null 2>&1 \
-    || { echo "xd: no such mark: $1" >&2; return 1; }
-  (
-    flock -w 5 200 || true
-    jq -c --arg n "$1" \
-      'if .starred == true and .name == $n then (.starred = false | .name = null | .note = null) else . end' \
-      "$SESSIONS_FILE" > "$SESSIONS_FILE.tmp" && mv "$SESSIONS_FILE.tmp" "$SESSIONS_FILE"
-  ) 200>"$SESSIONS_FILE.lock"
-  echo "unmarked '$1' (session kept — see xl)"
-}
-
-# Tab completion for starred names on xd/xs (so overwriting an existing
-# mark can be completed too) and for xg, which also completes journal
-# HASHes so an unstarred session is still tab-completable. Bash only --
-# zsh users with bashcompinit loaded will pick this up as well since it
-# uses the same `complete` builtin, but this isn't tested under plain zsh.
-am_complete () {
-  local f="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
-  [ -r "$f" ] || return 0
-  local cur=${COMP_WORDS[COMP_CWORD]}
-  COMPREPLY=( $(compgen -W "$(jq -r 'select(.starred == true) | .name' "$f" 2>/dev/null)" -- "$cur") )
-}
+# Tab completion for xg/xs: both take a session HASH (a session_id
+# prefix) as their argument, so both complete against the same list.
+# Bash only -- zsh users with bashcompinit loaded will pick this up too
+# since it uses the same `complete` builtin, but this isn't tested under
+# plain zsh.
 am_complete_xg () {
   local f="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
   [ -r "$f" ] || return 0
-  local names hashes
-  names="$(jq -r 'select(.starred == true) | .name' "$f" 2>/dev/null)"
+  local hashes
   hashes="$(jq -r '.session_id[0:6]' "$f" 2>/dev/null)"
   local cur=${COMP_WORDS[COMP_CWORD]}
-  COMPREPLY=( $(compgen -W "$names $hashes" -- "$cur") )
+  COMPREPLY=( $(compgen -W "$hashes" -- "$cur") )
 }
 if [ -n "$BASH_VERSION" ]; then
-  complete -F am_complete_xg xg
-  complete -F am_complete xd xs
+  complete -F am_complete_xg xg xs
 fi

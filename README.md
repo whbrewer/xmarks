@@ -12,32 +12,36 @@ make install
 echo 'source ~/.local/bin/xmarks.sh' >> ~/.bashrc
 ```
 
-`make install` puts `xmarks.sh` plus the `xs/xg/xl/xd` command wrappers
+`make install` puts `xmarks.sh` plus the `xs/xg/xl` command wrappers
 into `~/.local/bin` (override with `PREFIX=...`); `make uninstall` removes
 them. The wrappers exist because shells inside a Claude Code session
 (`! xs ...`) never read `.bashrc`; in interactive shells the sourced
 functions shadow them. Only `xg` truly needs to be a function — the wrapper
-version resumes fine but can't leave your shell in the mark's directory,
-which is why the `source` line is still worth adding (put it above your
-bashrc's "not interactive" guard).
+version resumes fine but can't leave your shell in the starred session's
+directory, which is why the `source` line is still worth adding (put it
+above your bashrc's "not interactive" guard).
 
 Requires `jq` (for first-message previews). `fzf` is optional — if present,
 `xg` with no argument opens a fuzzy picker.
 
-Sourcing `xmarks.sh` also registers bash tab completion for `xg`, `xd`,
-and `xs` — press `<TAB>` after any of them to complete an existing mark
-name (`xg` also completes journal HASHes, see below). No separate step;
-it's set up wherever the `source` line runs.
+Sourcing `xmarks.sh` also registers bash tab completion for `xg` and
+`xs` — press `<TAB>` after either to complete an existing session's
+HASH. No separate step; it's set up wherever the `source` line runs.
 
 ## Usage
 
 ```bash
-xs <name> [note...]   # star the session in the current dir; [note...] is
-                      # optional and always overwrites whatever
-                      # description (auto or previous) was showing
-xg <name|hash>        # cd there and resume the session (a starred name
-                      # from xl, or any session's HASH from xl — no xs
-                      # needed)
+xs [hash] [note...]   # star/un-star (toggle). Inside a session, plain
+                      # `xs` stars it, no hash needed. Outside one,
+                      # `xs <hash>` targets any session by its xl HASH;
+                      # a bare `xs` guesses the newest session for the
+                      # current dir instead. Starring an already-starred
+                      # session un-stars it (and clears its note).
+                      # [note...] is optional and, when given, always
+                      # overwrites whatever description (auto or
+                      # previous) was showing; it's cleared on un-star.
+xg [hash]             # cd there and resume the session (any session's
+                      # HASH from xl, starred or not)
 xl [-l|--long] [-s|--starred] [pattern]  # every session, oldest to
                       # newest (latest at the bottom); last 20 by
                       # default. -s limits to starred sessions; a
@@ -45,39 +49,39 @@ xl [-l|--long] [-s|--starred] [pattern]  # every session, oldest to
                       # cap). -l is a git-log-style paragraph view (full
                       # hash, dir, untruncated summary) instead of the
                       # oneline table
-xd <name>             # un-star a session (kept in xl, just drops out of
-                      # `xl -s` — nothing is deleted)
 xq                    # is this session/dir starred? (inside a session: `! xq`)
 ```
 
 The best way to star a session is from *inside* it:
 
 ```
-! xs pact-schema the one where we designed the pact schema
+! xs the one where we designed the pact schema
 ```
 
-Shells spawned by Claude Code export `CLAUDE_CODE_SESSION_ID`, so this marks
-the exact session — no guessing. Run outside a session, `xs` falls back to
-the most recent session for the current directory, across all tools and
-accounts. The `[note...]` is optional — if you skip it, `xl` falls back to
-the session's auto-generated summary once one exists (see below), so a
-session never needs a manual description to show up meaningfully.
+Shells spawned by Claude Code export `CLAUDE_CODE_SESSION_ID`, so this stars
+the exact session — no guessing, no hash needed. Run outside a session,
+`xs <hash>` targets any session directly by its `xl` HASH; a bare `xs`
+falls back to the most recent session for the current directory, across
+all tools and accounts. The `[note...]` is optional — if you skip it,
+`xl` falls back to the session's auto-generated summary/detail once one
+exists (see below), so a session never needs a manual description to show
+up meaningfully.
 
 ## /mark skill: let Claude write the note
 
 `make install-skill` installs a `/mark` skill into every `~/.claude*`
-config dir. Inside a session, `/mark` (or `/mark <name>`) has Claude pick
-a mark name, write a ≤10-word summary of what the session actually did,
-and save it via `xs` — the part of a bookmark bashmarks could never
-automate. New sessions pick the skill up automatically.
+config dir. Inside a session, `/mark` has Claude write a ≤10-word summary
+of what the session actually did and save it via `xs` — the part of a
+bookmark bashmarks could never automate. New sessions pick the skill up
+automatically.
 
 All state lives in one file, `~/.xmarks/sessions.jsonl` (one JSON object
 per line, one per session, override with `$XMARKS_SESSIONS`). Starring
 a session with `xs` doesn't create a separate record — it just sets
-`starred`/`name`/`note` on that session's existing row, alongside the
-`date`/`reason`/`summary` fields the hooks already track (see below). If
-a session's transcript is gone, `xg` still cd's to the directory and
-warns.
+`starred`/`note` on that session's existing row, alongside the
+`date`/`reason`/`summary`/`detail` fields the hooks already track (see
+below). If a session's transcript is gone, `xg` still cd's to the
+directory and warns.
 
 Upgrading from an older version migrates automatically the first time any
 command runs — the old `~/.xmarks` file and `~/.xmarks-journal` are moved
@@ -119,11 +123,11 @@ rows for one session. Later prompts in the same session are a no-op for
 this hook (it exits as soon as it sees a row already exists).
 
 Browse everything with `xl` (oldest to newest, latest at the bottom; last
-20 by default) or `xl <pattern>` to filter by substring, uncapped. Each
-row's MARK column shows the session's name if it's starred, or `-` if
-not, and every row also gets a HASH column (the first 6 characters of its
-session id) that `xg <hash>` resumes directly — so a session never needs
-an `xs` at all to be one command away. `xl -s`/`--starred` narrows the
+20 by default) or `xl <pattern>` to filter by substring, uncapped. Every
+row gets a HASH column (the first 6 characters of its session id) that
+`xg <hash>` resumes directly — so a session never needs an `xs` at all to
+be one command away — and starred rows get a `*` beside their hash.
+`xl -s`/`--starred` narrows the
 same listing to just starred sessions (what a plain `xl` used to show
 before it grew to cover every session). The default view is a
 `git log --oneline`-style table: it hides ACCOUNT, shows just the dir's
