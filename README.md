@@ -1,5 +1,9 @@
 # xmarks
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Shell: bash | zsh](https://img.shields.io/badge/shell-bash%20%7C%20zsh-89e051.svg)](#install)
+[![Requires: jq](https://img.shields.io/badge/requires-jq-orange.svg)](#install)
+
 Bashmarks-style bookmarks for coding-agent sessions (Claude Code and Codex
 CLI): save a mark, later jump back with one command that cd's into the
 directory *and* resumes the exact session. See `DESIGN.md` for the
