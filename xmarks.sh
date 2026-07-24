@@ -241,11 +241,11 @@ am_relative_date () {
   if [ "$diff" -lt 60 ]; then
     printf 'now'
   elif [ "$diff" -lt 3600 ]; then
-    printf '%dm ago' "$((diff / 60))"
+    printf '%dm' "$((diff / 60))"
   elif [ "$diff" -lt 86400 ]; then
-    printf '%dh ago' "$((diff / 3600))"
+    printf '%dh' "$((diff / 3600))"
   elif [ "$diff" -lt 604800 ]; then
-    printf '%dd ago' "$((diff / 86400))"
+    printf '%dd' "$((diff / 86400))"
   elif [ "$(date -d "$1" +%Y)" = "$(date +%Y)" ]; then
     date -d "$1" '+%b %d'
   else
@@ -529,9 +529,9 @@ xl () {
     } | am_page
   else
     { { if [ "$show_tool" = 1 ]; then
-          printf 'DATE\tHASH\tAGENT\tDIR\tSUMMARY\n'
+          printf 'HASH\tAGENT\tDIR\tSUMMARY\tAGE\n'
         else
-          printf 'DATE\tHASH\tDIR\tSUMMARY\n'
+          printf 'HASH\tDIR\tSUMMARY\tAGE\n'
         fi
         local maxlen="${XMARKS_NOTE_MAXLEN:-52}"
         printf '%s\n' "$rows" \
@@ -547,10 +547,10 @@ xl () {
             [ "$starred" = true ] && hashfield="${hashfield}${c_mark}*${c_reset}"
             if [ "$show_tool" = 1 ]; then
               printf '%s\t%s\t%s\t%s\t%s\n' \
-                "$date" "$hashfield" "${tool:-claude}" "$dir" "$(am_truncate "$shown" "$maxlen")"
+                "$hashfield" "${tool:-claude}" "$dir" "$(am_truncate "$shown" "$maxlen")" "$date"
             else
               printf '%s\t%s\t%s\t%s\n' \
-                "$date" "$hashfield" "$dir" "$(am_truncate "$shown" "$maxlen")"
+                "$hashfield" "$dir" "$(am_truncate "$shown" "$maxlen")" "$date"
             fi
           done
       # -c 1000: column -t silently drops trailing columns that don't fit

@@ -135,9 +135,10 @@ same listing to just starred sessions (what a plain `xl` used to show
 before it grew to cover every session). The default view is a
 `git log --oneline`-style table: it hides ACCOUNT, shows just the dir's
 basename, shortens SUMMARY to keep things narrow (preferring the
-manual note over the auto-summary when a session has one), and shows
-DATE as a relative time (`3h ago`, `2d ago`, falling back to `Jul 20` or
-`Jul 20 2025` past a week) to keep the column short. `xl -l`/
+manual note over the auto-summary when a session has one), and trails
+with an AGE column (`3h`, `2d`, falling back to `Jul 20` or `Jul 20
+2025` past a week — kubectl's `AGE` convention) instead of a full
+timestamp. `xl -l`/
 `--long` is `git log`-style instead — one paragraph block per session,
 newest first (like real `git log`, the reverse of the oneline table's
 oldest-first order), with the full session id, account, full path, the
