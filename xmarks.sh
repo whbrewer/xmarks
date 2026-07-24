@@ -19,7 +19,8 @@
 #                          starred sessions, a pattern filters (either
 #                          lifts the cap); -l shows a git-log-style
 #                          paragraph per session instead of the oneline
-#                          table
+#                          table, newest session first (like real
+#                          `git log`, unlike the oneline table above)
 #   xq                     is this session / directory starred?
 #
 # All state lives in one file, ~/.xmarks/sessions.jsonl, one JSON object
@@ -474,7 +475,9 @@ xl () {
   local IFS=$'\x1f' date sid dir home reason summary detail note starred tool
   if [ "$long" = 1 ]; then
     local first=1
-    { printf '%s\n' "$rows" \
+    # $rows is oldest-to-newest (for the compact table below); -l instead
+    # matches real `git log`'s convention of newest session first.
+    { printf '%s\n' "$rows" | tac \
     | jq -r '[.date, .session_id, .dir, .home, (.reason // ""), (.summary // ""), (.detail // ""),
               (.note // ""), (.starred // false), (.tool // "")] | join("\u001f")' \
     | while read -r date sid dir home reason summary detail note starred tool; do

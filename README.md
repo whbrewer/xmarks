@@ -47,8 +47,8 @@ xl [-l|--long] [-s|--starred] [pattern]  # every session, oldest to
                       # default. -s limits to starred sessions; a
                       # pattern filters by substring (either lifts the
                       # cap). -l is a git-log-style paragraph view (full
-                      # hash, dir, untruncated summary) instead of the
-                      # oneline table
+                      # hash, dir, untruncated summary), newest session
+                      # first, instead of the oneline table
 xq                    # is this session/dir starred? (inside a session: `! xq`)
 ```
 
@@ -133,10 +133,11 @@ before it grew to cover every session). The default view is a
 `git log --oneline`-style table: it hides ACCOUNT, shows just the dir's
 basename, and shortens SUMMARY to keep things narrow (preferring the
 manual note over the auto-summary when a session has one). `xl -l`/
-`--long` is `git log`-style instead — one paragraph block per session
-with the full session id, account, full path, and the note if set, else
-the longer LLM-generated `detail`, else the short `summary`, wrapped like
-a commit body. Like git, both views color the
+`--long` is `git log`-style instead — one paragraph block per session,
+newest first (like real `git log`, the reverse of the oneline table's
+oldest-first order), with the full session id, account, full path, and
+the note if set, else the longer LLM-generated `detail`, else the short
+`summary`, wrapped like a commit body. Like git, both views color the
 hash (and mark) and page through `$PAGER`/`less` when run at a terminal —
 plain, unpaged text otherwise (piping to a file or another command), and
 `NO_COLOR=1` turns colors off. `make uninstall-hook` removes both hooks.
