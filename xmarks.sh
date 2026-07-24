@@ -160,7 +160,7 @@ am_migrate () {
 }
 
 am_claude_dirs () {
-  if [ -n "$XMARKS_CONFIG_DIRS" ]; then
+  if [ -n "${XMARKS_CONFIG_DIRS:-}" ]; then
     printf '%s\n' "$XMARKS_CONFIG_DIRS" | tr ':' '\n'
   else
     local d
@@ -171,9 +171,9 @@ am_claude_dirs () {
 }
 
 am_codex_homes () {
-  if [ -n "$XMARKS_CODEX_HOMES" ]; then
+  if [ -n "${XMARKS_CODEX_HOMES:-}" ]; then
     printf '%s\n' "$XMARKS_CODEX_HOMES" | tr ':' '\n'
-  elif [ -n "$CODEX_HOME" ]; then
+  elif [ -n "${CODEX_HOME:-}" ]; then
     printf '%s\n' "$CODEX_HOME"
   else
     local d
@@ -238,7 +238,7 @@ am_page () {
   # screen on exit) so scrollback isn't wiped; falls back further to
   # `cat` if neither is available.
   if [ -t 1 ]; then
-    if [ -n "$PAGER" ]; then
+    if [ -n "${PAGER:-}" ]; then
       $PAGER
     elif command -v less >/dev/null 2>&1; then
       less -FRX
@@ -285,19 +285,21 @@ xs () {
   # A hash prefix naming an existing session, given outside a session, is
   # consumed as the target; every other argument (in-session always, or
   # anything left after a hash) is note text.
+  local session_id="${CLAUDE_CODE_SESSION_ID:-}"
+  local arg1="${1:-}"
   local hash_arg=""
-  if [ -z "$CLAUDE_CODE_SESSION_ID" ] && [ -n "$1" ] && [ -s "$SESSIONS_FILE" ] \
-       && jq -e --arg h "$1" 'select(.session_id | startswith($h))' "$SESSIONS_FILE" >/dev/null 2>&1; then
-    hash_arg="$1"; shift
+  if [ -z "$session_id" ] && [ -n "$arg1" ] && [ -s "$SESSIONS_FILE" ] \
+       && jq -e --arg h "$arg1" 'select(.session_id | startswith($h))' "$SESSIONS_FILE" >/dev/null 2>&1; then
+    hash_arg="$arg1"; shift
   fi
   local note="$*"
   local sid file home tool markdir="$PWD"
-  if [ -n "$CLAUDE_CODE_SESSION_ID" ]; then
+  if [ -n "$session_id" ]; then
     # Running inside a Claude Code session (e.g. via `! xs`): no guessing,
     # no hash needed -- always this exact session.
     # (Codex exports no session id to child shells, so no codex equivalent.)
     tool=claude
-    sid="$CLAUDE_CODE_SESSION_ID"
+    sid="$session_id"
     home="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
     file="$(am_proj_dir "$home" "$PWD")/$sid.jsonl"
     # The shell may have cd'd away from the session's start dir; find the
@@ -395,7 +397,7 @@ xg () {
   am_migrate
   local SESSIONS_FILE="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
   [ -s "$SESSIONS_FILE" ] || { echo "xg: no sessions yet" >&2; return 1; }
-  local hash="$1" line
+  local hash="${1:-}" line
   if [ -z "$hash" ]; then
     if command -v fzf >/dev/null 2>&1; then
       line="$(jq -r 'select(.starred == true) | [(.session_id[0:6]), (.note // .summary // "-"), (.summary // "-")] | @tsv' "$SESSIONS_FILE" \
@@ -437,7 +439,7 @@ xl () {
   local SESSIONS_FILE="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
   local long=0 starred_only=0
   while :; do
-    case "$1" in
+    case "${1:-}" in
       -l|--long|--full) long=1; shift ;;
       -s|--starred) starred_only=1; shift ;;
       *) break ;;
@@ -453,7 +455,7 @@ xl () {
   # the same way on every row (even "-"), so the constant escape-code
   # overhead cancels out in column -t's width math instead of skewing it.
   local c_hash="" c_mark="" c_dim="" c_warn="" c_reset=""
-  if [ -t 1 ] && [ -z "$NO_COLOR" ]; then
+  if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
     c_hash=$'\033[33m'   # yellow, like git's commit hash
     c_mark=$'\033[36m'   # cyan, for the starred indicator
     c_dim=$'\033[2m'
@@ -462,11 +464,12 @@ xl () {
   fi
   # -s (or a pattern) is already a small, deliberate subset -- no cap.
   # Otherwise last 20, oldest to newest (latest at the bottom).
+  local pattern="${1:-}"
   local rows
   rows="$(
     { if [ "$starred_only" = 1 ]; then jq -c 'select(.starred == true)' "$SESSIONS_FILE"
       else cat "$SESSIONS_FILE"; fi; } \
-    | tac | { [ -n "$1" ] && grep -i -- "$1" || { [ "$starred_only" = 1 ] && cat || head -20; }; } | tac
+    | tac | { [ -n "$pattern" ] && grep -i -- "$pattern" || { [ "$starred_only" = 1 ] && cat || head -20; }; } | tac
   )"
   # AGENT is only worth a column/line when the listed sessions actually mix
   # tools; with everything on claude (the common case) it's a no-op value.
@@ -540,8 +543,9 @@ xq () {
   am_migrate
   local SESSIONS_FILE="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
   local hits
-  if [ -n "$CLAUDE_CODE_SESSION_ID" ]; then
-    hits="$(jq -r --arg s "$CLAUDE_CODE_SESSION_ID" \
+  local session_id="${CLAUDE_CODE_SESSION_ID:-}"
+  if [ -n "$session_id" ]; then
+    hits="$(jq -r --arg s "$session_id" \
       'select(.session_id == $s and .starred == true) | "  " + .session_id[0:6] + "  (" + (.note // .summary // "-") + ")"' \
       "$SESSIONS_FILE" 2>/dev/null)"
     if [ -n "$hits" ]; then
@@ -570,10 +574,11 @@ xq () {
 xd () {
   am_migrate
   local SESSIONS_FILE="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
-  [ -n "$1" ] || { echo "usage: xd <hash>" >&2; return 1; }
+  local arg1="${1:-}"
+  [ -n "$arg1" ] || { echo "usage: xd <hash>" >&2; return 1; }
   [ -s "$SESSIONS_FILE" ] || { echo "xd: no sessions yet" >&2; return 1; }
-  local line; line="$(jq -c --arg h "$1" 'select(.session_id | startswith($h))' "$SESSIONS_FILE" | tail -1)"
-  [ -n "$line" ] || { echo "xd: no such session: $1" >&2; return 1; }
+  local line; line="$(jq -c --arg h "$arg1" 'select(.session_id | startswith($h))' "$SESSIONS_FILE" | tail -1)"
+  [ -n "$line" ] || { echo "xd: no such session: $arg1" >&2; return 1; }
   local sid desc
   sid="$(jq -r '.session_id' <<<"$line")"
   desc="$(jq -r '.note // .detail // .summary // "-"' <<<"$line")"
