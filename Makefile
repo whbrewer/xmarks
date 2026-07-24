@@ -38,7 +38,7 @@ uninstall-skill:
 
 # Register the SessionEnd and UserPromptSubmit journal hooks in every
 # ~/.claude* settings.json (backs each up to settings.json.bak first).
-# Browse the journal with xj.
+# Browse the journal with xl.
 install-hook:
 	install -m 755 hooks/xmarks-sessionend $(BINDIR)/xmarks-sessionend
 	install -m 755 hooks/xmarks-summarize-async $(BINDIR)/xmarks-summarize-async

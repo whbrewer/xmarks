@@ -43,4 +43,4 @@ this directory and resume this exact conversation.
   run `make install` in the xmarks repo.
 - If the user asks to overwrite or rename an existing mark, `xs` with an
   existing name replaces it, and `xd <name>` un-stars one (the session
-  stays in `xj`, it just drops out of `xl`).
+  stays in `xl`, it just drops out of `xl -s`).

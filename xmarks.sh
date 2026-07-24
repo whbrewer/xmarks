@@ -7,15 +7,17 @@
 #                          description (auto or previous) was showing
 #   xg [name|hash]         cd to its dir and resume the session (a
 #                          starred name from xl, or any session's HASH
-#                          from xj — no xs needed)
-#   xl [-l|--long]         list starred sessions (-l shows ACCOUNT, the
-#                          full path, and the untruncated NOTE/SUMMARY)
-#   xd <name>              un-star a session (kept in xj, just drops out
-#                          of xl — nothing is deleted)
+#                          from xl — no xs needed)
+#   xl [-l|--long] [-s|--starred] [pattern]  every session, oldest to
+#                          newest (latest at the bottom); each row's
+#                          HASH is an xg shortcut. Last 20 by default;
+#                          -s limits to starred sessions, a pattern
+#                          filters (either lifts the cap); -l shows a
+#                          git-log-style paragraph per session instead
+#                          of the oneline table
+#   xd <name>              un-star a session (kept in xl, just drops out
+#                          of `xl -s` — nothing is deleted)
 #   xq                     is this session / directory starred?
-#   xj [-l|--long] [pattern]  every session, oldest to newest (latest at
-#                          the bottom); each row's HASH is an xg shortcut
-#                          (-l adds ACCOUNT and the full path/SUMMARY)
 #
 # All state lives in one file, ~/.xmarks/sessions.jsonl, one JSON object
 # per session:
@@ -214,8 +216,28 @@ am_truncate () {
   fi
 }
 
+am_page () {
+  # Page like git does: only when stdout is the terminal itself, so
+  # `xl | grep foo` or `xl > file` still gets plain, unpaged text. Honors
+  # $PAGER; falls back to `less -FRX` (-F: quit if it fits one screen, -R:
+  # show color codes as color instead of garbage, -X: don't clear the
+  # screen on exit) so scrollback isn't wiped; falls back further to
+  # `cat` if neither is available.
+  if [ -t 1 ]; then
+    if [ -n "$PAGER" ]; then
+      $PAGER
+    elif command -v less >/dev/null 2>&1; then
+      less -FRX
+    else
+      cat
+    fi
+  else
+    cat
+  fi
+}
+
 am_display_dir () {
-  # $1 = raw dir, $2 = "1" for the full ~-shortened path (xl/xj -l); else
+  # $1 = raw dir, $2 = "1" for the full ~-shortened path (xl -l); else
   # just the basename, so default listings stay narrow.
   local dir="$1"
   case "$dir" in
@@ -335,13 +357,13 @@ xg () {
         | fzf --delimiter='\t' --with-nth=1,2,3)" || return 1
       name="$(printf '%s' "$line" | cut -f1)"
     else
-      xl; printf 'usage: xg <name|hash>\n' >&2; return 1
+      xl -s; printf 'usage: xg <name|hash>\n' >&2; return 1
     fi
   fi
   local dir sid home tool
   line="$(jq -c --arg n "$name" 'select(.starred == true and .name == $n)' "$SESSIONS_FILE" | tail -1)"
   if [ -z "$line" ]; then
-    # Not a starred name -- try it as an xj HASH (a session_id prefix), so
+    # Not a starred name -- try it as an xl HASH (a session_id prefix), so
     # sessions never explicitly `xs`'d are still one command to resume.
     line="$(jq -c --arg h "$name" 'select(.session_id | startswith($h))' "$SESSIONS_FILE" | tail -1)"
   fi
@@ -372,101 +394,98 @@ xg () {
 xl () {
   am_migrate
   local SESSIONS_FILE="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
-  local long=0
-  case "$1" in -l|--long|--full) long=1 ;; esac
-  [ -s "$SESSIONS_FILE" ] || { echo "xl: no marks yet" >&2; return 1; }
-  # TOOL is only worth a column when marks actually mix tools; with every
-  # session on claude (the common case) it's a repeated no-op value.
-  local show_tool=0
-  [ "$(jq -s '[.[] | select(.starred == true)] | any(.[]; .tool == "codex")' "$SESSIONS_FILE")" = true ] && show_tool=1
-  { if [ "$long" = 1 ]; then
-      if [ "$show_tool" = 1 ]; then
-        printf 'NAME\tTOOL\tACCOUNT\tDIR\tNOTE\tDATE\tSUMMARY\n'
-      else
-        printf 'NAME\tACCOUNT\tDIR\tNOTE\tDATE\tSUMMARY\n'
-      fi
-    else
-      if [ "$show_tool" = 1 ]; then
-        printf 'NAME\tTOOL\tACCOUNT\tDIR\tNOTE\tDATE\n'
-      else
-        printf 'NAME\tACCOUNT\tDIR\tNOTE\tDATE\n'
-      fi
-    fi
-    local IFS=$'\x1f' name dir sid note date summary home tool
-    local maxlen="${XMARKS_NOTE_MAXLEN:-52}"
-    while read -r name dir sid note date summary home tool; do
-      tool="${tool:-claude}"
-      [ -n "$home" ] || { [ "$tool" = codex ] && home="$HOME/.codex" || home="$HOME/.claude"; }
-      dir="$(am_display_dir "$dir" "$long")"
-      if [ "$long" = 1 ]; then
-        if [ "$show_tool" = 1 ]; then
-          printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
-            "$name" "$tool" "$(am_account "$home")" "$dir" "${note:--}" "$date" "${summary:--}"
-        else
-          printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
-            "$name" "$(am_account "$home")" "$dir" "${note:--}" "$date" "${summary:--}"
-        fi
-      else
-        local shown="${note:-$summary}"; shown="${shown:--}"
-        if [ "$show_tool" = 1 ]; then
-          printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
-            "$name" "$tool" "$(am_account "$home")" "$dir" "$(am_truncate "$shown" "$maxlen")" "$date"
-        else
-          printf '%s\t%s\t%s\t%s\t%s\n' \
-            "$name" "$(am_account "$home")" "$dir" "$(am_truncate "$shown" "$maxlen")" "$date"
-        fi
-      fi
-    done < <(jq -r 'select(.starred == true)
-                    | [.name, .dir, .session_id, (.note // ""), .date, (.summary // ""), .home, .tool]
-                    | join("\u001f")' "$SESSIONS_FILE")
-  # -c 1000: util-linux column -t silently drops trailing columns that don't
-  # fit the terminal width instead of wrapping -- a wide -l row would
-  # otherwise lose SUMMARY with no indication anything was cut.
-  } | column -t -s"$(printf '\t')" -c 1000
-}
-
-# xj: every session, written by the hooks (make install-hook). Oldest-to-
-# newest (latest at the bottom); optional pattern filters, else last 20.
-# -l/--long adds ACCOUNT and the full path/untruncated SUMMARY (default
-# view drops ACCOUNT, shows just the dir basename, and shortens SUMMARY
-# to keep columns narrow).
-xj () {
-  am_migrate
-  local SESSIONS_FILE="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
-  local long=0
-  case "$1" in -l|--long|--full) long=1; shift ;; esac
+  local long=0 starred_only=0
+  while :; do
+    case "$1" in
+      -l|--long|--full) long=1; shift ;;
+      -s|--starred) starred_only=1; shift ;;
+      *) break ;;
+    esac
+  done
   [ -s "$SESSIONS_FILE" ] || {
-    echo "xj: no journal yet — install the SessionEnd hook: make install-hook" >&2
+    echo "xl: no sessions yet — install the SessionEnd hook: make install-hook" >&2
     return 1
   }
-  { if [ "$long" = 1 ]; then
-      printf 'DATE\tHASH\tMARK\tACCOUNT\tDIR\tSUMMARY\n'
-    else
-      printf 'DATE\tHASH\tMARK\tDIR\tSUMMARY\n'
-    fi
-    # \x1f (not a literal tab) joins these fields: summary/reason can be
-    # null for a marks-only historical row with no journal entry, and
-    # bash's `read` collapses adjacent tab delimiters (tab counts as IFS
-    # whitespace regardless of what IFS is set to) which would silently
-    # shift every field after an empty one.
-    local IFS=$'\x1f' date sid dir home reason summary mark
-    local maxlen="${XMARKS_NOTE_MAXLEN:-52}"
-    tac "$SESSIONS_FILE" | { [ -n "$1" ] && grep -i -- "$1" || head -20; } | tac \
-    | jq -r '[.date, .session_id, .dir, .home, (.reason // ""), (.summary // ""),
-              (if .starred == true then .name else "-" end)] | join("\u001f")' \
-    | while read -r date sid dir home reason summary mark; do
-        dir="$(am_display_dir "$dir" "$long")"
-        if [ "$long" = 1 ]; then
-          printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
-            "$date" "${sid:0:6}" "$mark" "$(am_account "$home")" "$dir" "$summary"
-        else
-          printf '%s\t%s\t%s\t%s\t%s\n' \
-            "$date" "${sid:0:6}" "$mark" "$dir" "$(am_truncate "$summary" "$maxlen")"
-        fi
+  # Color (like git) only for an interactive terminal, and never if the
+  # user opted out with $NO_COLOR -- piping xl to a file or another
+  # command gets plain text either way. Every colored field is wrapped
+  # the same way on every row (even "-"), so the constant escape-code
+  # overhead cancels out in column -t's width math instead of skewing it.
+  local c_hash="" c_mark="" c_dim="" c_warn="" c_reset=""
+  if [ -t 1 ] && [ -z "$NO_COLOR" ]; then
+    c_hash=$'\033[33m'   # yellow, like git's commit hash
+    c_mark=$'\033[36m'   # cyan, like a named ref
+    c_dim=$'\033[2m'
+    c_warn=$'\033[1;31m'
+    c_reset=$'\033[0m'
+  fi
+  # -s (or a pattern) is already a small, deliberate subset -- no cap.
+  # Otherwise last 20, oldest to newest (latest at the bottom).
+  local rows
+  rows="$(
+    { if [ "$starred_only" = 1 ]; then jq -c 'select(.starred == true)' "$SESSIONS_FILE"
+      else cat "$SESSIONS_FILE"; fi; } \
+    | tac | { [ -n "$1" ] && grep -i -- "$1" || { [ "$starred_only" = 1 ] && cat || head -20; }; } | tac
+  )"
+  # TOOL is only worth a column/line when the listed sessions actually mix
+  # tools; with everything on claude (the common case) it's a no-op value.
+  local show_tool=0
+  [ -n "$rows" ] && [ "$(jq -sc 'any(.[]; .tool == "codex")' <<<"$rows")" = true ] && show_tool=1
+  # \x1f (not a literal tab) joins these fields: summary/note/reason can be
+  # null, and bash's `read` collapses adjacent tab delimiters (tab counts
+  # as IFS whitespace regardless of what IFS is set to) which would
+  # silently shift every field after an empty one.
+  local IFS=$'\x1f' date sid dir home reason summary note mark tool
+  if [ "$long" = 1 ]; then
+    local first=1
+    { printf '%s\n' "$rows" \
+    | jq -r '[.date, .session_id, .dir, .home, (.reason // ""), (.summary // ""), (.note // ""),
+              (if .starred == true then .name else "" end), (.tool // "")] | join("\u001f")' \
+    | while read -r date sid dir home reason summary note mark tool; do
+        tool="${tool:-claude}"
+        [ -n "$home" ] || { [ "$tool" = codex ] && home="$HOME/.codex" || home="$HOME/.claude"; }
+        dir="$(am_display_dir "$dir" 1)"
+        [ "$first" = 1 ] || printf '\n'
+        first=0
+        printf '%ssession %s%s\n' "$c_hash" "$sid" "$c_reset"
+        [ -n "$mark" ] && printf 'Mark:    %s%s%s\n' "$c_mark" "$mark" "$c_reset"
+        [ "$tool" = codex ] && printf 'Tool:    %s%s%s\n' "$c_dim" "$tool" "$c_reset"
+        [ "$reason" = in_progress ] && printf 'Status:  %sin progress%s\n' "$c_warn" "$c_reset"
+        printf 'Account: %s\n' "$(am_account "$home")"
+        printf 'Dir:     %s\n' "$dir"
+        printf 'Date:    %s%s%s\n' "$c_dim" "$date" "$c_reset"
+        printf '\n'
+        printf '%s\n' "${note:-${summary:--}}" | fold -s -w 76 | sed 's/^/    /'
       done
-  # -c 1000: same column -t width-truncation quirk as xl -- without it a
-  # long -l SUMMARY silently vanishes instead of wrapping.
-  } | column -t -s"$(printf '\t')" -c 1000
+    } | am_page
+  else
+    { { if [ "$show_tool" = 1 ]; then
+          printf 'DATE\tHASH\tMARK\tTOOL\tDIR\tSUMMARY\n'
+        else
+          printf 'DATE\tHASH\tMARK\tDIR\tSUMMARY\n'
+        fi
+        local maxlen="${XMARKS_NOTE_MAXLEN:-52}"
+        printf '%s\n' "$rows" \
+        | jq -r '[.date, .session_id, .dir, .home, (.reason // ""), (.summary // ""), (.note // ""),
+                  (if .starred == true then .name else "-" end), (.tool // "")] | join("\u001f")' \
+        | while read -r date sid dir home reason summary note mark tool; do
+            dir="$(am_display_dir "$dir" 0)"
+            local shown="${note:-$summary}"; shown="${shown:--}"
+            if [ "$show_tool" = 1 ]; then
+              printf '%s\t%s%s%s\t%s%s%s\t%s\t%s\t%s\n' \
+                "$date" "$c_hash" "${sid:0:6}" "$c_reset" "$c_mark" "$mark" "$c_reset" \
+                "${tool:-claude}" "$dir" "$(am_truncate "$shown" "$maxlen")"
+            else
+              printf '%s\t%s%s%s\t%s%s%s\t%s\t%s\n' \
+                "$date" "$c_hash" "${sid:0:6}" "$c_reset" "$c_mark" "$mark" "$c_reset" \
+                "$dir" "$(am_truncate "$shown" "$maxlen")"
+            fi
+          done
+      # -c 1000: column -t silently drops trailing columns that don't fit
+      # the terminal width instead of wrapping.
+      } | column -t -s"$(printf '\t')" -c 1000
+    } | am_page
+  fi
 }
 
 # xq: is this session saved? Inside a Claude Code session (`! xq`) checks
@@ -512,7 +531,7 @@ xd () {
       'if .starred == true and .name == $n then (.starred = false | .name = null | .note = null) else . end' \
       "$SESSIONS_FILE" > "$SESSIONS_FILE.tmp" && mv "$SESSIONS_FILE.tmp" "$SESSIONS_FILE"
   ) 200>"$SESSIONS_FILE.lock"
-  echo "unmarked '$1' (session kept — see xj)"
+  echo "unmarked '$1' (session kept — see xl)"
 }
 
 # Tab completion for starred names on xd/xs (so overwriting an existing

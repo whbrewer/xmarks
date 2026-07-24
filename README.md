@@ -36,15 +36,18 @@ xs <name> [note...]   # star the session in the current dir; [note...] is
                       # optional and always overwrites whatever
                       # description (auto or previous) was showing
 xg <name|hash>        # cd there and resume the session (a starred name
-                      # from xl, or any session's HASH from xj — no xs
+                      # from xl, or any session's HASH from xl — no xs
                       # needed)
-xl [-l|--long]        # list starred sessions; -l shows ACCOUNT, the full
-                      # path, and the untruncated NOTE/SUMMARY
-xd <name>             # un-star a session (kept in xj, just drops out of
-                      # xl — nothing is deleted)
+xl [-l|--long] [-s|--starred] [pattern]  # every session, oldest to
+                      # newest (latest at the bottom); last 20 by
+                      # default. -s limits to starred sessions; a
+                      # pattern filters by substring (either lifts the
+                      # cap). -l is a git-log-style paragraph view (full
+                      # hash, dir, untruncated summary) instead of the
+                      # oneline table
+xd <name>             # un-star a session (kept in xl, just drops out of
+                      # `xl -s` — nothing is deleted)
 xq                    # is this session/dir starred? (inside a session: `! xq`)
-xj [-l|--long] [pattern]  # every session, oldest to newest; -l shows
-                      # ACCOUNT and the full path
 ```
 
 The best way to star a session is from *inside* it:
@@ -56,9 +59,9 @@ The best way to star a session is from *inside* it:
 Shells spawned by Claude Code export `CLAUDE_CODE_SESSION_ID`, so this marks
 the exact session — no guessing. Run outside a session, `xs` falls back to
 the most recent session for the current directory, across all tools and
-accounts. The `[note...]` is optional — if you skip it, `xl`/`xj` fall
-back to the session's auto-generated summary once one exists (see below),
-so a session never needs a manual description to show up meaningfully.
+accounts. The `[note...]` is optional — if you skip it, `xl` falls back to
+the session's auto-generated summary once one exists (see below), so a
+session never needs a manual description to show up meaningfully.
 
 ## /mark skill: let Claude write the note
 
@@ -110,15 +113,23 @@ overwrites `reason`/`summary` with the real outcome as usual — never two
 rows for one session. Later prompts in the same session are a no-op for
 this hook (it exits as soon as it sees a row already exists).
 
-Browse everything with `xj` (oldest to newest, latest at the bottom; last
-20 by default) or `xj <pattern>` to filter. Each row's MARK column shows
-the session's name if it's starred, or `-` if not, and every row also
-gets a HASH column (the first 6 characters of its session id) that
-`xg <hash>` resumes directly — so a session never needs an `xs` at all to
-be one command away. The default view hides ACCOUNT, shows just the dir's
-basename, and shortens SUMMARY to keep things narrow; `xj -l`/`--long`
-shows ACCOUNT and the full path/untruncated SUMMARY. `make uninstall-hook`
-removes both hooks.
+Browse everything with `xl` (oldest to newest, latest at the bottom; last
+20 by default) or `xl <pattern>` to filter by substring, uncapped. Each
+row's MARK column shows the session's name if it's starred, or `-` if
+not, and every row also gets a HASH column (the first 6 characters of its
+session id) that `xg <hash>` resumes directly — so a session never needs
+an `xs` at all to be one command away. `xl -s`/`--starred` narrows the
+same listing to just starred sessions (what a plain `xl` used to show
+before it grew to cover every session). The default view is a
+`git log --oneline`-style table: it hides ACCOUNT, shows just the dir's
+basename, and shortens SUMMARY to keep things narrow (preferring the
+manual note over the auto-summary when a session has one). `xl -l`/
+`--long` is `git log`-style instead — one paragraph block per session
+with the full session id, account, full path, and the untruncated
+note/summary wrapped like a commit body. Like git, both views color the
+hash (and mark) and page through `$PAGER`/`less` when run at a terminal —
+plain, unpaged text otherwise (piping to a file or another command), and
+`NO_COLOR=1` turns colors off. `make uninstall-hook` removes both hooks.
 
 The SessionEnd hook itself always returns in well under a second: it
 writes the heuristic summary synchronously, then — if an LLM summary is
