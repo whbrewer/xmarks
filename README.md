@@ -159,7 +159,7 @@ home dir its session lives in (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`, e.g.
 `~/.claude-personal` vs `~/.claude-work`). `xg` dispatches accordingly —
 `CLAUDE_CONFIG_DIR=... claude --resume` or `CODEX_HOME=... codex resume` —
 so sessions from every account and both tools share one file, and `xl`
-shows an ACCOUNT column for each (plus a TOOL column, but only when
+shows an ACCOUNT column for each (plus an AGENT column, but only when
 starred sessions from both `claude` and `codex` actually coexist —
 otherwise it's dropped as a repeated no-op value).
 

@@ -464,7 +464,7 @@ xl () {
       else cat "$SESSIONS_FILE"; fi; } \
     | tac | { [ -n "$1" ] && grep -i -- "$1" || { [ "$starred_only" = 1 ] && cat || head -20; }; } | tac
   )"
-  # TOOL is only worth a column/line when the listed sessions actually mix
+  # AGENT is only worth a column/line when the listed sessions actually mix
   # tools; with everything on claude (the common case) it's a no-op value.
   local show_tool=0
   [ -n "$rows" ] && [ "$(jq -sc 'any(.[]; .tool == "codex")' <<<"$rows")" = true ] && show_tool=1
@@ -499,7 +499,7 @@ xl () {
     } | am_page
   else
     { { if [ "$show_tool" = 1 ]; then
-          printf 'DATE\tHASH\tTOOL\tDIR\tSUMMARY\n'
+          printf 'DATE\tHASH\tAGENT\tDIR\tSUMMARY\n'
         else
           printf 'DATE\tHASH\tDIR\tSUMMARY\n'
         fi
