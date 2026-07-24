@@ -12,7 +12,7 @@ make install
 echo 'source ~/.local/bin/xmarks.sh' >> ~/.bashrc
 ```
 
-`make install` puts `xmarks.sh` plus the `xs/xg/xl` command wrappers
+`make install` puts `xmarks.sh` plus the `xs/xg/xl/xd` command wrappers
 into `~/.local/bin` (override with `PREFIX=...`); `make uninstall` removes
 them. The wrappers exist because shells inside a Claude Code session
 (`! xs ...`) never read `.bashrc`; in interactive shells the sourced
@@ -50,6 +50,9 @@ xl [-l|--long] [-s|--starred] [pattern]  # every session, oldest to
                       # hash, dir, untruncated summary), newest session
                       # first, instead of the oneline table
 xq                    # is this session/dir starred? (inside a session: `! xq`)
+xd <hash>             # permanently delete a session's row (asks for
+                      # confirmation first). Unlike un-starring via `xs`,
+                      # the row is gone from `xl` for good.
 ```
 
 The best way to star a session is from *inside* it:

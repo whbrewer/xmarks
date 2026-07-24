@@ -11,6 +11,7 @@ install:
 	install -m 755 xs $(BINDIR)/xs
 	ln -sf xs $(BINDIR)/xg
 	ln -sf xs $(BINDIR)/xl
+	ln -sf xs $(BINDIR)/xd
 	@echo ''
 	@echo 'Installed to $(BINDIR).'
 	@echo 'For the full xg (one that leaves your shell in the starred session''s'
@@ -20,7 +21,7 @@ install:
 	@echo '  source $(BINDIR)/xmarks.sh'
 
 uninstall:
-	rm -f $(BINDIR)/xmarks.sh $(BINDIR)/xs $(BINDIR)/xg $(BINDIR)/xl
+	rm -f $(BINDIR)/xmarks.sh $(BINDIR)/xs $(BINDIR)/xg $(BINDIR)/xl $(BINDIR)/xd
 
 # Install the /mark skill into every Claude Code config dir (~/.claude*),
 # so Claude can bookmark its own session with an auto-generated summary.

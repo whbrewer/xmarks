@@ -22,6 +22,10 @@
 #                          table, newest session first (like real
 #                          `git log`, unlike the oneline table above)
 #   xq                     is this session / directory starred?
+#   xd <hash>              permanently delete a session's row (unlike
+#                          un-starring via `xs`, this drops it from `xl`
+#                          entirely -- summary/detail/note gone for good).
+#                          Asks for confirmation first.
 #
 # All state lives in one file, ~/.xmarks/sessions.jsonl, one JSON object
 # per session:
@@ -559,11 +563,39 @@ xq () {
   fi
 }
 
-# Tab completion for xg/xs: both take a session HASH (a session_id
-# prefix) as their argument, so both complete against the same list.
-# Bash only -- zsh users with bashcompinit loaded will pick this up too
-# since it uses the same `complete` builtin, but this isn't tested under
-# plain zsh.
+# xd: permanently delete a session's row by its xl HASH -- unlike xs
+# un-starring (which keeps the row, just drops the star), this removes it
+# from sessions.jsonl entirely, so it's gone from xl for good. Confirms
+# first since there's no undo.
+xd () {
+  am_migrate
+  local SESSIONS_FILE="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
+  [ -n "$1" ] || { echo "usage: xd <hash>" >&2; return 1; }
+  [ -s "$SESSIONS_FILE" ] || { echo "xd: no sessions yet" >&2; return 1; }
+  local line; line="$(jq -c --arg h "$1" 'select(.session_id | startswith($h))' "$SESSIONS_FILE" | tail -1)"
+  [ -n "$line" ] || { echo "xd: no such session: $1" >&2; return 1; }
+  local sid desc
+  sid="$(jq -r '.session_id' <<<"$line")"
+  desc="$(jq -r '.note // .detail // .summary // "-"' <<<"$line")"
+  local reply
+  read -r -p "delete session ${sid:0:6} ($desc)? [y/N] " reply
+  case "$reply" in
+    y|Y|yes|YES) ;;
+    *) echo "xd: aborted"; return 1 ;;
+  esac
+  (
+    flock -w 5 200 || true
+    jq -c --arg s "$sid" 'select(.session_id != $s)' "$SESSIONS_FILE" > "$SESSIONS_FILE.tmp" \
+      && mv "$SESSIONS_FILE.tmp" "$SESSIONS_FILE"
+  ) 200>"$SESSIONS_FILE.lock"
+  echo "deleted ${sid:0:6} (was: \"$desc\")"
+}
+
+# Tab completion for xg/xs/xd: all three take a session HASH (a
+# session_id prefix) as their argument, so all complete against the same
+# list. Bash only -- zsh users with bashcompinit loaded will pick this up
+# too since it uses the same `complete` builtin, but this isn't tested
+# under plain zsh.
 am_complete_xg () {
   local f="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
   [ -r "$f" ] || return 0
@@ -573,5 +605,5 @@ am_complete_xg () {
   COMPREPLY=( $(compgen -W "$hashes" -- "$cur") )
 }
 if [ -n "$BASH_VERSION" ]; then
-  complete -F am_complete_xg xg xs
+  complete -F am_complete_xg xg xs xd
 fi
