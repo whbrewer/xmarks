@@ -46,19 +46,27 @@ user_and_assistant_text () {
 write_row () {
   (
     flock -w 5 200 || true
-    local old starred name note tool
+    local old starred name note tool detail
     old="$([ -f "$sessions" ] && jq -c --arg s "$sid" 'select(.session_id == $s)' "$sessions" | tail -1)"
     starred="$(jq -r '.starred // false' <<<"${old:-null}" 2>/dev/null)"
     name="$(jq -r '.name // empty' <<<"${old:-null}" 2>/dev/null)"
     note="$(jq -r '.note // empty' <<<"${old:-null}" 2>/dev/null)"
     tool="$(jq -r '.tool // "claude"' <<<"${old:-null}" 2>/dev/null)"
+    # A resumed session re-triggers this heuristic write on every exit;
+    # keep whatever long-form detail an earlier async LLM pass already
+    # produced rather than blanking it out for the few seconds until that
+    # pass reruns and refreshes it.
+    detail="$(jq -r '.detail // empty' <<<"${old:-null}" 2>/dev/null)"
     {
       [ -f "$sessions" ] && jq -c --arg s "$sid" 'select(.session_id != $s)' "$sessions"
       jq -nc --arg date "$(date '+%F %H:%M')" --arg sid "$sid" --arg dir "$cwd" \
         --arg home "$home" --arg tool "$tool" --arg reason "$reason" --arg summary "$1" \
+        --arg detail "$detail" \
         --argjson starred "${starred:-false}" --arg name "$name" --arg note "$note" \
         '{date: $date, session_id: $sid, dir: $dir, home: $home, tool: $tool,
-          reason: $reason, summary: $summary, starred: $starred,
+          reason: $reason, summary: $summary,
+          detail: (if $detail == "" then null else $detail end),
+          starred: $starred,
           name: (if $name == "" then null else $name end),
           note: (if $note == "" then null else $note end)}'
     } > "$sessions.tmp" && mv "$sessions.tmp" "$sessions"

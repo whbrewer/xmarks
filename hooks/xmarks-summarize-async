@@ -1,19 +1,34 @@
 #!/usr/bin/env bash
 # Background helper spawned (detached, via setsid) by xmarks-sessionend:
-# asks haiku for a short summary of one session, then patches its row in
-# place. Runs independent of the hook and of Claude Code entirely, so
-# it's free to take whatever time an LLM call needs without risking
-# "hook cancelled". Any failure here — no network, spend limit reached,
-# `claude` missing, timeout — exits quietly; the heuristic summary
-# xmarks-sessionend already wrote stands unchanged.
+# asks haiku for a short summary + a longer commit-message-style writeup
+# of one session, then patches its row in place. Runs independent of the
+# hook and of Claude Code entirely, so it's free to take whatever time an
+# LLM call needs without risking "hook cancelled". Any failure here — no
+# network, spend limit reached, `claude` missing, timeout — exits
+# quietly; the heuristic summary xmarks-sessionend already wrote stands
+# unchanged.
 
 sid="$1" sessions="$2" cwd="$3" home="$4" reason="$5"
 excerpt="$(cat)"
 
-summary="$(cd "${TMPDIR:-/tmp}" && printf '%s\n' "$excerpt" \
+# Two outputs from one call: SUMMARY is the short one-liner shown in the
+# xl/xj table columns (kept genuinely short so it's never cut off); DETAIL
+# is a longer commit-message-style paragraph (what happened, key
+# decisions, outcome), only ever shown via `xv` since it can't fit a
+# table row. The awk join folds a DETAIL that wraps onto further lines
+# (the model doesn't always obey "one line") into a single stored line.
+raw="$(cd "${TMPDIR:-/tmp}" && printf '%s\n' "$excerpt" \
   | XMARKS_IN_HOOK=1 timeout 45 claude -p --model haiku \
-      "Summarize this coding-agent session in at most 12 words. Output only the summary, no preamble." \
-      2>/dev/null | grep -v '^$' | head -1 | tr '\t' ' ' | cut -c1-100)"
+      'Summarize this coding-agent session. Output exactly two lines, nothing else, no markdown:
+SUMMARY: <at most 12 words, no preamble>
+DETAIL: <a commit-message-style paragraph, 2-4 sentences, covering what was done, key decisions/why, and the outcome>' \
+      2>/dev/null)"
+summary="$(printf '%s\n' "$raw" | sed -n 's/^SUMMARY:[[:space:]]*//p' | head -1 \
+  | tr '\t' ' ' | cut -c1-100)"
+detail="$(printf '%s\n' "$raw" | awk '
+  /^DETAIL:/ { sub(/^DETAIL:[[:space:]]*/, ""); printf "%s", $0; f=1; next }
+  f { printf " %s", $0 }
+' | tr '\t' ' ' | cut -c1-700)"
 [ -n "$summary" ] || exit 0
 
 (
@@ -34,9 +49,12 @@ summary="$(cd "${TMPDIR:-/tmp}" && printf '%s\n' "$excerpt" \
     [ -f "$sessions" ] && jq -c --arg s "$sid" 'select(.session_id != $s)' "$sessions"
     jq -nc --arg date "$date" --arg sid "$sid" --arg dir "$cwd" \
       --arg home "$home" --arg tool "$tool" --arg reason "$reason" --arg summary "$summary" \
+      --arg detail "$detail" \
       --argjson starred "${starred:-false}" --arg name "$name" --arg note "$note" \
       '{date: $date, session_id: $sid, dir: $dir, home: $home, tool: $tool,
-        reason: $reason, summary: $summary, starred: $starred,
+        reason: $reason, summary: $summary,
+        detail: (if $detail == "" then null else $detail end),
+        starred: $starred,
         name: (if $name == "" then null else $name end),
         note: (if $note == "" then null else $note end)}'
   } > "$sessions.tmp" && mv "$sessions.tmp" "$sessions"

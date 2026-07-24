@@ -21,19 +21,23 @@
 #
 # All state lives in one file, ~/.xmarks/sessions.jsonl, one JSON object
 # per session:
-#   {date, session_id, dir, home, tool, reason, summary, starred, name, note}
+#   {date, session_id, dir, home, tool, reason, summary, detail, starred, name, note}
 # date/reason/summary are auto-tracked by the hooks: the UserPromptSubmit
 # hook seeds a row right after the first prompt (reason "in_progress",
 # summary = that prompt's own text, no LLM call), so a session that dies
 # without a clean exit -- a dropped SSH connection, say -- still shows up
 # instead of vanishing entirely; SessionEnd overwrites reason/summary with
 # the real outcome (a heuristic first message, patched in place with an
-# LLM summary shortly after, unless XMARKS_AUTOSUMMARY=first).
+# LLM summary shortly after, unless XMARKS_AUTOSUMMARY=first). That same
+# LLM pass also writes detail, a longer commit-message-style paragraph
+# (what was done, key decisions, outcome) -- summary stays a short
+# one-liner for the table, detail is only ever shown in `xl -l`'s
+# per-session paragraph view, since it doesn't fit a table row.
 # starred/name/note are only ever set by `xs` and cleared by `xd` (which
 # un-stars rather than deleting the row). note is optional free text
-# that, when given, always wins over summary for display; when absent,
-# listings fall back to the auto summary -- so a session never needs a
-# manual description to be meaningfully listed.
+# that, when given, always wins over detail/summary for display; when
+# absent, listings fall back to detail, then the short auto summary -- so
+# a session never needs a manual description to be meaningfully listed.
 # tool is "claude" or "codex" (default "claude") and home is the
 # CLAUDE_CONFIG_DIR / CODEX_HOME the session lives in, so sessions from
 # different accounts and tools coexist and resume correctly.
@@ -435,13 +439,13 @@ xl () {
   # null, and bash's `read` collapses adjacent tab delimiters (tab counts
   # as IFS whitespace regardless of what IFS is set to) which would
   # silently shift every field after an empty one.
-  local IFS=$'\x1f' date sid dir home reason summary note mark tool
+  local IFS=$'\x1f' date sid dir home reason summary detail note mark tool
   if [ "$long" = 1 ]; then
     local first=1
     { printf '%s\n' "$rows" \
-    | jq -r '[.date, .session_id, .dir, .home, (.reason // ""), (.summary // ""), (.note // ""),
-              (if .starred == true then .name else "" end), (.tool // "")] | join("\u001f")' \
-    | while read -r date sid dir home reason summary note mark tool; do
+    | jq -r '[.date, .session_id, .dir, .home, (.reason // ""), (.summary // ""), (.detail // ""),
+              (.note // ""), (if .starred == true then .name else "" end), (.tool // "")] | join("\u001f")' \
+    | while read -r date sid dir home reason summary detail note mark tool; do
         tool="${tool:-claude}"
         [ -n "$home" ] || { [ "$tool" = codex ] && home="$HOME/.codex" || home="$HOME/.claude"; }
         dir="$(am_display_dir "$dir" 1)"
@@ -455,7 +459,7 @@ xl () {
         printf 'Dir:     %s\n' "$dir"
         printf 'Date:    %s%s%s\n' "$c_dim" "$date" "$c_reset"
         printf '\n'
-        printf '%s\n' "${note:-${summary:--}}" | fold -s -w 76 | sed 's/^/    /'
+        printf '%s\n' "${note:-${detail:-${summary:--}}}" | fold -s -w 76 | sed 's/^/    /'
       done
     } | am_page
   else
