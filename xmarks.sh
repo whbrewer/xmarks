@@ -573,8 +573,9 @@ xl () {
             fi
           done
       # -c 1000: column -t silently drops trailing columns that don't fit
-      # the terminal width instead of wrapping.
-      } | column -t -s"$(printf '\t')" -c 1000
+      # the terminal width instead of wrapping. -R right-aligns AGE (last
+      # column, 5th with AGENT shown, else 4th) so its digits line up.
+      } | column -t -s"$(printf '\t')" -c 1000 -R "$([ "$show_tool" = 1 ] && echo 5 || echo 4)"
     } | am_page
   fi
 }
