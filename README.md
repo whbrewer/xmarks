@@ -95,12 +95,17 @@ mistake is always recoverable.
 `make install-hook` registers a `SessionEnd` hook and a `UserPromptSubmit`
 hook in every `~/.claude*` settings.json (each backed up to `.bak` first).
 When a Claude Code session ends, the SessionEnd hook updates that
-session's row with the real outcome: `reason` and an auto-generated
-`summary` — by default it asks haiku via `claude -p` for ≤12 words about
-the transcript (a few seconds, a fraction of a cent per session); set
-`XMARKS_AUTOSUMMARY=first` to skip the LLM and use the session's first
-user message instead. Starred sessions keep their `name`/`note`
-untouched — this only ever updates `date`/`reason`/`summary`.
+session's row with the real outcome: `reason`, an auto-generated
+`summary`, and a longer `detail` — by default it asks haiku via
+`claude -p` for both in one call: `summary` is ≤12 words for the `xl`
+table columns, `detail` is a 2-4 sentence commit-message-style paragraph
+(what was done, key decisions, outcome) shown in `xl -l`'s per-session
+view (a few seconds, a fraction of a cent per session). Override the
+model with `XMARKS_SUMMARY_MODEL` (any `--model` value `claude -p`
+accepts) or set `XMARKS_AUTOSUMMARY=first` to skip the LLM entirely and
+use the session's first user message as `summary` (`detail` stays unset
+in that case). Starred sessions keep their `name`/`note` untouched — this
+only ever updates `date`/`reason`/`summary`/`detail`.
 
 The UserPromptSubmit hook writes an earlier, cheaper version of that same
 update the moment the *first* prompt is sent — no LLM call, just that
@@ -125,8 +130,9 @@ before it grew to cover every session). The default view is a
 basename, and shortens SUMMARY to keep things narrow (preferring the
 manual note over the auto-summary when a session has one). `xl -l`/
 `--long` is `git log`-style instead — one paragraph block per session
-with the full session id, account, full path, and the untruncated
-note/summary wrapped like a commit body. Like git, both views color the
+with the full session id, account, full path, and the note if set, else
+the longer LLM-generated `detail`, else the short `summary`, wrapped like
+a commit body. Like git, both views color the
 hash (and mark) and page through `$PAGER`/`less` when run at a terminal —
 plain, unpaged text otherwise (piping to a file or another command), and
 `NO_COLOR=1` turns colors off. `make uninstall-hook` removes both hooks.
@@ -134,7 +140,7 @@ plain, unpaged text otherwise (piping to a file or another command), and
 The SessionEnd hook itself always returns in well under a second: it
 writes the heuristic summary synchronously, then — if an LLM summary is
 wanted — launches a fully detached background job
-(`xmarks-summarize-async`, via `setsid`) that asks haiku and patches the
+(`xmarks-summarize-async`, via `setsid`) that asks the LLM and patches the
 row in place once it's ready. This matters because SessionEnd hooks get
 killed if they run too long; earlier versions called `claude -p` inline
 and could be cancelled outright (losing the update) if that call stalled

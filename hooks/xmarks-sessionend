@@ -5,12 +5,13 @@
 # synchronously, so this hook always returns in a fraction of a second and
 # can never be killed for running too long. If XMARKS_AUTOSUMMARY is
 # unset or "llm" (the default), it also launches a fully detached
-# background job (xmarks-summarize-async) that asks haiku for a
-# better <=12-word summary and patches the row in place once it's ready —
-# after this hook, and possibly the whole claude process, has exited. If
-# that call fails for any reason (no network, spend limit reached,
-# `claude` missing, timeout), the heuristic summary already on disk
-# stands; nothing here depends on the LLM call succeeding.
+# background job (xmarks-summarize-async) that asks an LLM (haiku by
+# default; override with XMARKS_SUMMARY_MODEL) for a better <=12-word
+# summary plus a longer detail paragraph, and patches the row in place
+# once it's ready — after this hook, and possibly the whole claude
+# process, has exited. If that call fails for any reason (no network,
+# spend limit reached, `claude` missing, timeout), the heuristic summary
+# already on disk stands; nothing here depends on the LLM call succeeding.
 # Set XMARKS_AUTOSUMMARY=first to skip the LLM step entirely.
 
 [ -n "$XMARKS_IN_HOOK" ] && exit 0  # must not recurse into our own claude -p

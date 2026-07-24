@@ -1,24 +1,28 @@
 #!/usr/bin/env bash
 # Background helper spawned (detached, via setsid) by xmarks-sessionend:
-# asks haiku for a short summary + a longer commit-message-style writeup
+# asks an LLM for a short summary + a longer commit-message-style writeup
 # of one session, then patches its row in place. Runs independent of the
 # hook and of Claude Code entirely, so it's free to take whatever time an
 # LLM call needs without risking "hook cancelled". Any failure here — no
 # network, spend limit reached, `claude` missing, timeout — exits
 # quietly; the heuristic summary xmarks-sessionend already wrote stands
 # unchanged.
+#
+# XMARKS_SUMMARY_MODEL picks the model (any --model value `claude -p`
+# accepts); default is haiku, the cheapest/fastest tier, since this runs
+# once per session purely to produce a short blurb.
 
 sid="$1" sessions="$2" cwd="$3" home="$4" reason="$5"
 excerpt="$(cat)"
 
 # Two outputs from one call: SUMMARY is the short one-liner shown in the
-# xl/xj table columns (kept genuinely short so it's never cut off); DETAIL
+# xl table columns (kept genuinely short so it's never cut off); DETAIL
 # is a longer commit-message-style paragraph (what happened, key
-# decisions, outcome), only ever shown via `xv` since it can't fit a
+# decisions, outcome), only ever shown via `xl -l` since it can't fit a
 # table row. The awk join folds a DETAIL that wraps onto further lines
 # (the model doesn't always obey "one line") into a single stored line.
 raw="$(cd "${TMPDIR:-/tmp}" && printf '%s\n' "$excerpt" \
-  | XMARKS_IN_HOOK=1 timeout 45 claude -p --model haiku \
+  | XMARKS_IN_HOOK=1 timeout 45 claude -p --model "${XMARKS_SUMMARY_MODEL:-haiku}" \
       'Summarize this coding-agent session. Output exactly two lines, nothing else, no markdown:
 SUMMARY: <at most 12 words, no preamble>
 DETAIL: <a commit-message-style paragraph, 2-4 sentences, covering what was done, key decisions/why, and the outcome>' \
