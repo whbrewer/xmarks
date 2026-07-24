@@ -398,7 +398,7 @@ xs () {
     note=""
   fi
   (
-    flock -w 5 200 || true
+    flock -w 5 9 || true
     {
       [ -f "$SESSIONS_FILE" ] && jq -c --arg s "$sid" 'select(.session_id != $s)' "$SESSIONS_FILE"
       jq -nc --arg date "$date" --arg sid "$sid" --arg dir "$markdir" \
@@ -411,7 +411,7 @@ xs () {
           starred: $starred,
           note: (if $note == "" then null else $note end)}'
     } > "$SESSIONS_FILE.tmp" && mv "$SESSIONS_FILE.tmp" "$SESSIONS_FILE"
-  ) 200>"$SESSIONS_FILE.lock"
+  ) 9>"$SESSIONS_FILE.lock"
   if [ "$new_starred" = true ]; then
     echo "starred ${sid:0:6} → $sid  [$tool/$(am_account "$home")]  ($markdir)"
   else
@@ -633,10 +633,10 @@ xd () {
     *) echo "xd: aborted"; return 1 ;;
   esac
   (
-    flock -w 5 200 || true
+    flock -w 5 9 || true
     jq -c --arg s "$sid" 'select(.session_id != $s)' "$SESSIONS_FILE" > "$SESSIONS_FILE.tmp" \
       && mv "$SESSIONS_FILE.tmp" "$SESSIONS_FILE"
-  ) 200>"$SESSIONS_FILE.lock"
+  ) 9>"$SESSIONS_FILE.lock"
   echo "deleted ${sid:0:6} (was: \"$desc\")"
 }
 
