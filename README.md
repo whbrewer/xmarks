@@ -42,13 +42,14 @@ xs [hash] [note...]   # star/un-star (toggle). Inside a session, plain
                       # previous) was showing; it's cleared on un-star.
 xg [hash]             # cd there and resume the session (any session's
                       # HASH from xl, starred or not)
-xl [-l|--long] [-s|--starred] [pattern]  # every session, oldest to
-                      # newest (latest at the bottom); last 20 by
-                      # default. -s limits to starred sessions; a
+xl [-l|--long] [-s|--starred] [-r|--reverse] [pattern]  # every session,
+                      # oldest to newest (latest at the bottom); last 20
+                      # by default. -s limits to starred sessions; a
                       # pattern filters by substring (either lifts the
                       # cap). -l is a git-log-style paragraph view (full
                       # hash, dir, untruncated summary), newest session
-                      # first, instead of the oneline table
+                      # first, instead of the oneline table. -r reverses
+                      # whichever of those is the default order
 xq                    # is this session/dir starred? (inside a session: `! xq`)
 xd <hash>             # permanently delete a session's row (asks for
                       # confirmation first). Unlike un-starring via `xs`,
@@ -143,8 +144,11 @@ timestamp. `xl -l`/
 newest first (like real `git log`, the reverse of the oneline table's
 oldest-first order), with the full session id, account, full path, the
 exact `Date:`, and the note if set, else the longer LLM-generated
-`detail`, else the short `summary`, wrapped like a commit body. Like
-git, both views color the
+`detail`, else the short `summary`, wrapped like a commit body. `-r`/
+`--reverse` flips whichever of those is the default order for the view
+in use — `xl -r` puts the newest session at the top of the table,
+`xl -l -r` matches real `git log --reverse` and puts the oldest session
+first. Like git, both views color the
 hash (and mark) and page through `$PAGER`/`less` when run at a terminal —
 plain, unpaged text otherwise (piping to a file or another command), and
 `NO_COLOR=1` turns colors off. `make uninstall-hook` removes both hooks.

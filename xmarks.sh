@@ -12,15 +12,17 @@
 #                          cleared on un-star.
 #   xg [hash]              cd to its dir and resume the session (any
 #                          session's HASH from xl, starred or not)
-#   xl [-l|--long] [-s|--starred] [pattern]  every session, oldest to
-#                          newest (latest at the bottom); each row's
-#                          HASH is an xg shortcut, starred rows get a *
-#                          beside it. Last 20 by default; -s limits to
-#                          starred sessions, a pattern filters (either
-#                          lifts the cap); -l shows a git-log-style
-#                          paragraph per session instead of the oneline
-#                          table, newest session first (like real
-#                          `git log`, unlike the oneline table above)
+#   xl [-l|--long] [-s|--starred] [-r|--reverse] [pattern]  every
+#                          session, oldest to newest (latest at the
+#                          bottom); each row's HASH is an xg shortcut,
+#                          starred rows get a * beside it. Last 20 by
+#                          default; -s limits to starred sessions, a
+#                          pattern filters (either lifts the cap); -l
+#                          shows a git-log-style paragraph per session
+#                          instead of the oneline table, newest session
+#                          first (like real `git log`, unlike the
+#                          oneline table above); -r reverses whichever
+#                          of those is the default order
 #   xq                     is this session / directory starred?
 #   xd <hash>              permanently delete a session's row (unlike
 #                          un-starring via `xs`, this drops it from `xl`
@@ -460,11 +462,12 @@ xg () {
 xl () {
   am_migrate
   local SESSIONS_FILE="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
-  local long=0 starred_only=0
+  local long=0 starred_only=0 reverse=0
   while :; do
     case "${1:-}" in
       -l|--long|--full) long=1; shift ;;
       -s|--starred) starred_only=1; shift ;;
+      -r|--reverse) reverse=1; shift ;;
       *) break ;;
     esac
   done
@@ -503,11 +506,15 @@ xl () {
   # as IFS whitespace regardless of what IFS is set to) which would
   # silently shift every field after an empty one.
   local IFS=$'\x1f' date sid dir home reason summary detail note starred tool
+  # $rows is oldest-to-newest. Default: compact table keeps that order
+  # (newest at the bottom); -l flips it, matching real `git log`'s
+  # newest-first convention. -r/--reverse flips whichever is the default
+  # for the view in use (so `xl -l -r` matches `git log --reverse`).
+  local flip=0
+  [ "$long" != "$reverse" ] && flip=1
   if [ "$long" = 1 ]; then
     local first=1
-    # $rows is oldest-to-newest (for the compact table below); -l instead
-    # matches real `git log`'s convention of newest session first.
-    { printf '%s\n' "$rows" | tac \
+    { printf '%s\n' "$rows" | { [ "$flip" = 1 ] && tac || cat; } \
     | jq -r '[.date, .session_id, .dir, .home, (.reason // ""), (.summary // ""), (.detail // ""),
               (.note // ""), (.starred // false), (.tool // "")] | join("\u001f")' \
     | while read -r date sid dir home reason summary detail note starred tool; do
@@ -534,7 +541,7 @@ xl () {
           printf 'HASH\tDIR\tSUMMARY\tAGE\n'
         fi
         local maxlen="${XMARKS_NOTE_MAXLEN:-52}"
-        printf '%s\n' "$rows" \
+        printf '%s\n' "$rows" | { [ "$flip" = 1 ] && tac || cat; } \
         | jq -r '[.date, .session_id, .dir, .home, (.reason // ""), (.summary // ""), (.note // ""),
                   (.starred // false), (.tool // "")] | join("\u001f")' \
         | while read -r date sid dir home reason summary note starred tool; do
