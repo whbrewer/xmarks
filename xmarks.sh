@@ -12,12 +12,13 @@
 #                          cleared on un-star.
 #   xg [hash]              cd to its dir and resume the session (any
 #                          session's HASH from xl, starred or not)
-#   xl [-l|--long] [-s|--starred] [-r|--reverse] [pattern]  every
+#   xl [-l|--long] [-s|--starred] [-r|--reverse] [-n N] [pattern]  every
 #                          session, oldest to newest (latest at the
 #                          bottom); each row's HASH is an xg shortcut,
 #                          starred rows get a * beside it. Last 20 by
 #                          default; -s limits to starred sessions, a
-#                          pattern filters (either lifts the cap); -l
+#                          pattern filters (either lifts the cap); -n N
+#                          overrides the count shown either way; -l
 #                          shows a git-log-style paragraph per session
 #                          instead of the oneline table, newest session
 #                          first (like real `git log`, unlike the
@@ -462,12 +463,17 @@ xg () {
 xl () {
   am_migrate
   local SESSIONS_FILE="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
-  local long=0 starred_only=0 reverse=0
+  local long=0 starred_only=0 reverse=0 limit=20 limit_set=0
   while :; do
     case "${1:-}" in
       -l|--long|--full) long=1; shift ;;
       -s|--starred) starred_only=1; shift ;;
       -r|--reverse) reverse=1; shift ;;
+      -n) limit="${2:-}"
+          case "$limit" in
+            ''|*[!0-9]*) echo "xl: -n requires a number" >&2; return 1 ;;
+          esac
+          limit_set=1; shift 2 ;;
       *) break ;;
     esac
   done
@@ -488,14 +494,20 @@ xl () {
     c_warn=$'\033[1;31m'
     c_reset=$'\033[0m'
   fi
-  # -s (or a pattern) is already a small, deliberate subset -- no cap.
-  # Otherwise last 20, oldest to newest (latest at the bottom).
+  # -s (or a pattern) is already a small, deliberate subset -- no cap,
+  # unless -n overrides it explicitly. Otherwise last 20 (or -n's count),
+  # oldest to newest (latest at the bottom).
   local pattern="${1:-}"
+  local use_cap=1
+  [ "$limit_set" = 0 ] && { [ "$starred_only" = 1 ] || [ -n "$pattern" ]; } && use_cap=0
   local rows
   rows="$(
     { if [ "$starred_only" = 1 ]; then jq -c 'select(.starred == true)' "$SESSIONS_FILE"
       else cat "$SESSIONS_FILE"; fi; } \
-    | tac | { [ -n "$pattern" ] && grep -i -- "$pattern" || { [ "$starred_only" = 1 ] && cat || head -20; }; } | tac
+    | tac \
+    | { [ -n "$pattern" ] && grep -i -- "$pattern" || cat; } \
+    | { [ "$use_cap" = 1 ] && head -n "$limit" || cat; } \
+    | tac
   )"
   # AGENT is only worth a column/line when the listed sessions actually mix
   # tools; with everything on claude (the common case) it's a no-op value.

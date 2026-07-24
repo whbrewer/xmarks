@@ -42,13 +42,14 @@ xs [hash] [note...]   # star/un-star (toggle). Inside a session, plain
                       # previous) was showing; it's cleared on un-star.
 xg [hash]             # cd there and resume the session (any session's
                       # HASH from xl, starred or not)
-xl [-l|--long] [-s|--starred] [-r|--reverse] [pattern]  # every session,
-                      # oldest to newest (latest at the bottom); last 20
-                      # by default. -s limits to starred sessions; a
-                      # pattern filters by substring (either lifts the
-                      # cap). -l is a git-log-style paragraph view (full
-                      # hash, dir, untruncated summary), newest session
-                      # first, instead of the oneline table. -r reverses
+xl [-l|--long] [-s|--starred] [-r|--reverse] [-n N] [pattern]  # every
+                      # session, oldest to newest (latest at the bottom);
+                      # last 20 by default. -s limits to starred sessions;
+                      # a pattern filters by substring (either lifts the
+                      # cap); -n N overrides the count shown either way.
+                      # -l is a git-log-style paragraph view (full hash,
+                      # dir, untruncated summary), newest session first,
+                      # instead of the oneline table. -r reverses
                       # whichever of those is the default order
 xq                    # is this session/dir starred? (inside a session: `! xq`)
 xd <hash>             # permanently delete a session's row (asks for
@@ -127,7 +128,9 @@ rows for one session. Later prompts in the same session are a no-op for
 this hook (it exits as soon as it sees a row already exists).
 
 Browse everything with `xl` (oldest to newest, latest at the bottom; last
-20 by default) or `xl <pattern>` to filter by substring, uncapped. Every
+20 by default) or `xl <pattern>` to filter by substring, uncapped. `-n
+<N>` overrides the count shown either way — `xl -n 5` for just the last
+5, `xl -s -n 3` for the 3 most recent starred sessions. Every
 row gets a HASH column (the first 6 characters of its session id) that
 `xg <hash>` resumes directly — so a session never needs an `xs` at all to
 be one command away — and starred rows get a `*` beside their hash.
