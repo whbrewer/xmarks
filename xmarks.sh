@@ -230,6 +230,29 @@ am_truncate () {
   fi
 }
 
+am_relative_date () {
+  # $1 = a stored "YYYY-MM-DD HH:MM" date, for xl's compact table (xl -l
+  # keeps the full timestamp). Falls back to the raw string if `date -d`
+  # can't parse it (e.g. a hand-edited row).
+  local then_epoch now_epoch diff
+  then_epoch="$(date -d "$1" +%s 2>/dev/null)" || { printf '%s' "$1"; return; }
+  now_epoch="$(date +%s)"
+  diff=$((now_epoch - then_epoch))
+  if [ "$diff" -lt 60 ]; then
+    printf 'now'
+  elif [ "$diff" -lt 3600 ]; then
+    printf '%dm ago' "$((diff / 60))"
+  elif [ "$diff" -lt 86400 ]; then
+    printf '%dh ago' "$((diff / 3600))"
+  elif [ "$diff" -lt 604800 ]; then
+    printf '%dd ago' "$((diff / 86400))"
+  elif [ "$(date -d "$1" +%Y)" = "$(date +%Y)" ]; then
+    date -d "$1" '+%b %d'
+  else
+    date -d "$1" '+%b %d %Y'
+  fi
+}
+
 am_page () {
   # Page like git does: only when stdout is the terminal itself, so
   # `xl | grep foo` or `xl > file` still gets plain, unpaged text. Honors
@@ -516,6 +539,7 @@ xl () {
                   (.starred // false), (.tool // "")] | join("\u001f")' \
         | while read -r date sid dir home reason summary note starred tool; do
             dir="$(am_display_dir "$dir" 0)"
+            date="$(am_relative_date "$date")"
             local shown="${note:-$summary}"; shown="${shown:--}"
             # Starred rows get a * beside the hash, in the same color the
             # old MARK column used, instead of a separate column.
