@@ -54,15 +54,6 @@ Weakness of v1: `cms` guesses "most recent session in this dir", which is
 wrong if you've since opened another session here. Fine for the common
 "bookmark what I just did" flow.
 
-## Design v2 (maybe later): mark from inside the session
-A tiny user-level slash command / skill (`/mark <name> <note>`) that has
-Claude itself append the mark line — it knows the real session id and cwd,
-so no guessing. Could also auto-generate the note from the conversation
-("summarize this session in ≤10 words"), which is the part bashmarks
-could never do. A SessionStart hook could alternatively log every
-session's id+cwd+timestamp to a journal, so `cms` picks from a menu
-instead of guessing.
-
 ## Context beyond the note
 The jsonl itself contains the first user message — `cml` could show it as
 a fallback note, or `cms` could extract it at save time so listing stays
@@ -80,8 +71,7 @@ Code's own session cleanup/expiry.
   `CLAUDEMARKS_CONFIG_DIRS`).
 - Big v1 upgrade found: shells spawned from inside a session export
   `CLAUDE_CODE_SESSION_ID`, so `! cms foo` marks the *exact* session —
-  the "guess most recent" fallback only applies outside a session. This
-  makes most of v2's motivation moot.
+  the "guess most recent" fallback only applies outside a session.
 - Session expiry: handled defensively — `cmg` still cd's and warns if the
   jsonl is gone; the first-message preview is denormalized into the marks
   file at save time so listings survive expiry. (Whether/when Claude Code
@@ -111,5 +101,4 @@ shells, so exact in-session marking stays Claude-only.
 Built, tested, installed: `xmarks/` in this repo (xmarks.sh,
 xs dispatcher, Makefile, README). `make install` → ~/.local/bin;
 `source ~/.local/bin/xmarks.sh` in .bashrc (above the interactive
-guard). Marks in ~/.xmarks. Do v2 (auto-generated notes via /mark
-skill) only if this sticks.
+guard). Marks in ~/.xmarks.

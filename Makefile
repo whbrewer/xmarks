@@ -29,19 +29,6 @@ install:
 uninstall:
 	rm -f $(BINDIR)/xmarks.sh $(BINDIR)/xs $(BINDIR)/xg $(BINDIR)/xl $(BINDIR)/xd
 
-# Install the /mark skill into every Claude Code config dir (~/.claude*),
-# so Claude can bookmark its own session with an auto-generated summary.
-install-skill:
-	@for d in $(HOME)/.claude $(HOME)/.claude-*; do \
-	  [ -d $$d ] || continue; \
-	  install -d $$d/skills/mark; \
-	  install -m 644 skills/mark/SKILL.md $$d/skills/mark/SKILL.md; \
-	  echo "installed /mark skill → $$d/skills/mark"; \
-	done
-
-uninstall-skill:
-	rm -rf $(HOME)/.claude/skills/mark $(HOME)/.claude-*/skills/mark
-
 # Register the SessionEnd and UserPromptSubmit journal hooks in every
 # ~/.claude* settings.json (backs each up to settings.json.bak first).
 # Browse the journal with xl.
@@ -66,4 +53,4 @@ uninstall-hook:
 	done
 	rm -f $(BINDIR)/xmarks-sessionend $(BINDIR)/xmarks-summarize-async $(BINDIR)/xmarks-userpromptsubmit
 
-.PHONY: install uninstall install-skill uninstall-skill install-hook uninstall-hook
+.PHONY: install uninstall install-hook uninstall-hook

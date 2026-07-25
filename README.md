@@ -82,14 +82,6 @@ all tools and accounts. The `[note...]` is optional — if you skip it,
 exists (see below), so a session never needs a manual description to show
 up meaningfully.
 
-## /mark skill: let Claude write the note
-
-`make install-skill` installs a `/mark` skill into every `~/.claude*`
-config dir. Inside a session, `/mark` has Claude write a ≤10-word summary
-of what the session actually did and save it via `xs` — the part of a
-bookmark bashmarks could never automate. New sessions pick the skill up
-automatically.
-
 All state lives in one file, `~/.xmarks/sessions.jsonl` (one JSON object
 per line, one per session, override with `$XMARKS_SESSIONS`). Starring
 a session with `xs` doesn't create a separate record — it just sets
