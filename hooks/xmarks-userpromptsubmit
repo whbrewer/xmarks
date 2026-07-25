@@ -24,7 +24,7 @@ IN="$(cat)"
 sid="$(jq -r '.session_id // empty' <<<"$IN")"
 tp="$(jq -r '.transcript_path // empty' <<<"$IN")"
 cwd="$(jq -r '.cwd // empty' <<<"$IN")"
-prompt="$(jq -r '.user_input // empty' <<<"$IN")"
+prompt="$(jq -r '.prompt // empty' <<<"$IN")"
 [ -n "$sid" ] && [ -n "$tp" ] || exit 0
 home="${tp%/projects/*}"
 sessions="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
