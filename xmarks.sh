@@ -582,10 +582,18 @@ xl () {
     while IFS= read -r w; do
       [ "${#w}" -gt "$agewidth" ] && agewidth="${#w}"
     done <<<"$(printf '%s\n' "$rows" | jq -r '.date' | while IFS= read -r w; do am_relative_date "$w"; printf '\n'; done)"
-    { { if [ "$show_tool" = 1 ]; then
-          printf 'HASH\tAGENT\tDIR\tSUMMARY\t%*s\n' "$agewidth" AGE
+    { # The header's HASH cell must carry the same escape-code byte count
+      # as a data row's colored hash field (6 chars + mark, wrapped in
+      # c_hash/c_mark/c_reset) -- otherwise BSD/macOS `column -t`, which
+      # (unlike GNU's) can't tell ANSI codes are invisible, measures the
+      # header's plain "HASH" as much shorter than the data rows and pads
+      # every column after it far too wide.
+      local hash_header="HASH"
+      [ -n "$c_hash" ] && hash_header="${c_hash}$(printf '%-6s' HASH)${c_reset}${c_mark} ${c_reset}"
+      { if [ "$show_tool" = 1 ]; then
+          printf '%s\tAGENT\tDIR\tSUMMARY\t%*s\n' "$hash_header" "$agewidth" AGE
         else
-          printf 'HASH\tDIR\tSUMMARY\t%*s\n' "$agewidth" AGE
+          printf '%s\tDIR\tSUMMARY\t%*s\n' "$hash_header" "$agewidth" AGE
         fi
         local maxlen="${XMARKS_NOTE_MAXLEN:-52}"
         printf '%s\n' "$rows" | { [ "$flip" = 1 ] && tac || cat; } \
