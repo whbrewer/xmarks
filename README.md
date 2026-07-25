@@ -28,9 +28,15 @@ above your bashrc's "not interactive" guard).
 Requires `jq` (for first-message previews). `fzf` is optional — if present,
 `xg` with no argument opens a fuzzy picker.
 
-Sourcing `xmarks.sh` also registers bash tab completion for `xg` and
-`xs` — press `<TAB>` after either to complete an existing session's
-HASH. No separate step; it's set up wherever the `source` line runs.
+Sourcing `xmarks.sh` also registers tab completion for `xg`/`xs`/`xd` —
+press `<TAB>` after any of them to complete an existing session's HASH.
+Under bash this needs no separate step. Under zsh it needs the
+completion system loaded first — if `xg <TAB>` doesn't do anything, add
+this to `~/.zshrc` *before* the `source ~/.local/bin/xmarks.sh` line:
+
+```bash
+autoload -Uz compinit && compinit
+```
 
 ## Usage
 

@@ -19,6 +19,12 @@ install:
 	@echo 'guard, so that `! xs` also works inside Claude Code sessions:'
 	@echo ''
 	@echo '  source $(BINDIR)/xmarks.sh'
+	@echo ''
+	@echo 'zsh users: tab completion for xg/xs/xd needs the completion system'
+	@echo 'loaded first. If your ~/.zshrc doesn'"'"'t already do this, add it'
+	@echo 'before the `source` line above:'
+	@echo ''
+	@echo '  autoload -Uz compinit && compinit'
 
 uninstall:
 	rm -f $(BINDIR)/xmarks.sh $(BINDIR)/xs $(BINDIR)/xg $(BINDIR)/xl $(BINDIR)/xd
