@@ -665,7 +665,11 @@ xd () {
   [ -n "$line" ] || { echo "xd: no such session: $arg1" >&2; return 1; }
   local sid desc
   sid="$(jq -r '.session_id' <<<"$line")"
-  desc="$(jq -r '.note // .detail // .summary // "-"' <<<"$line")"
+  # note/summary, not detail: matches whatever xl's compact table (where
+  # this hash came from) actually showed for this row. .detail is the
+  # long commit-message-style writeup meant for `xl -l`'s paragraph view,
+  # not a one-line confirmation prompt.
+  desc="$(am_truncate "$(jq -r '.note // .summary // "-"' <<<"$line")" "${XMARKS_NOTE_MAXLEN:-52}")"
   local reply
   # `read -p` prints the prompt in bash, but in zsh `-p` means "read from
   # the coprocess" instead -- printing the prompt separately works the
