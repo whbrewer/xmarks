@@ -312,6 +312,29 @@ am_first_msg () {
      | head -1 | tr '\t' ' ' | cut -c1-70
 }
 
+am_lock () {
+  # Advisory lock so concurrent xs/xd calls don't race on sessions.jsonl.
+  # `mkdir` is atomic on every POSIX filesystem, unlike `flock` -- which
+  # macOS doesn't ship and has no equivalent for by default -- so this one
+  # primitive works on both. Waits up to ~5s for a live holder; past that,
+  # assumes the holder died without cleaning up (e.g. a killed shell) and
+  # reclaims the lock rather than deadlocking every call after it.
+  local lockdir="$1.lock.d" i=0
+  while ! mkdir "$lockdir" 2>/dev/null; do
+    i=$((i + 1))
+    if [ "$i" -ge 50 ]; then
+      rmdir "$lockdir" 2>/dev/null
+      mkdir "$lockdir" 2>/dev/null
+      break
+    fi
+    sleep 0.1
+  done
+}
+
+am_unlock () {
+  rmdir "$1.lock.d" 2>/dev/null
+}
+
 xs () {
   am_migrate
   local SESSIONS_FILE="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
@@ -404,21 +427,20 @@ xs () {
   else
     note=""
   fi
-  (
-    flock -w 5 9 || true
-    {
-      [ -f "$SESSIONS_FILE" ] && jq -c --arg s "$sid" 'select(.session_id != $s)' "$SESSIONS_FILE"
-      jq -nc --arg date "$date" --arg sid "$sid" --arg dir "$markdir" \
-        --arg home "$home" --arg tool "$tool" --arg reason "$reason" --arg summary "$summary" \
-        --arg detail "$detail" --argjson starred "$new_starred" --arg note "$note" \
-        '{date: $date, session_id: $sid, dir: $dir, home: $home, tool: $tool,
-          reason: (if $reason == "" then null else $reason end),
-          summary: (if $summary == "" then null else $summary end),
-          detail: (if $detail == "" then null else $detail end),
-          starred: $starred,
-          note: (if $note == "" then null else $note end)}'
-    } > "$SESSIONS_FILE.tmp" && mv "$SESSIONS_FILE.tmp" "$SESSIONS_FILE"
-  ) 9>"$SESSIONS_FILE.lock"
+  am_lock "$SESSIONS_FILE"
+  {
+    [ -f "$SESSIONS_FILE" ] && jq -c --arg s "$sid" 'select(.session_id != $s)' "$SESSIONS_FILE"
+    jq -nc --arg date "$date" --arg sid "$sid" --arg dir "$markdir" \
+      --arg home "$home" --arg tool "$tool" --arg reason "$reason" --arg summary "$summary" \
+      --arg detail "$detail" --argjson starred "$new_starred" --arg note "$note" \
+      '{date: $date, session_id: $sid, dir: $dir, home: $home, tool: $tool,
+        reason: (if $reason == "" then null else $reason end),
+        summary: (if $summary == "" then null else $summary end),
+        detail: (if $detail == "" then null else $detail end),
+        starred: $starred,
+        note: (if $note == "" then null else $note end)}'
+  } > "$SESSIONS_FILE.tmp" && mv "$SESSIONS_FILE.tmp" "$SESSIONS_FILE"
+  am_unlock "$SESSIONS_FILE"
   if [ "$new_starred" = true ]; then
     echo "starred ${sid:0:6} → $sid  [$tool/$(am_account "$home")]  ($markdir)"
   else
@@ -645,16 +667,19 @@ xd () {
   sid="$(jq -r '.session_id' <<<"$line")"
   desc="$(jq -r '.note // .detail // .summary // "-"' <<<"$line")"
   local reply
-  read -r -p "delete session ${sid:0:6} ($desc)? [y/N] " reply
+  # `read -p` prints the prompt in bash, but in zsh `-p` means "read from
+  # the coprocess" instead -- printing the prompt separately works the
+  # same way in both.
+  printf 'delete session %s (%s)? [y/N] ' "${sid:0:6}" "$desc"
+  read -r reply
   case "$reply" in
     y|Y|yes|YES) ;;
     *) echo "xd: aborted"; return 1 ;;
   esac
-  (
-    flock -w 5 9 || true
-    jq -c --arg s "$sid" 'select(.session_id != $s)' "$SESSIONS_FILE" > "$SESSIONS_FILE.tmp" \
-      && mv "$SESSIONS_FILE.tmp" "$SESSIONS_FILE"
-  ) 9>"$SESSIONS_FILE.lock"
+  am_lock "$SESSIONS_FILE"
+  jq -c --arg s "$sid" 'select(.session_id != $s)' "$SESSIONS_FILE" > "$SESSIONS_FILE.tmp" \
+    && mv "$SESSIONS_FILE.tmp" "$SESSIONS_FILE"
+  am_unlock "$SESSIONS_FILE"
   echo "deleted ${sid:0:6} (was: \"$desc\")"
 }
 
