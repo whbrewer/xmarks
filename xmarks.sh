@@ -660,9 +660,7 @@ xd () {
 
 # Tab completion for xg/xs/xd: all three take a session HASH (a
 # session_id prefix) as their argument, so all complete against the same
-# list. Bash only -- zsh users with bashcompinit loaded will pick this up
-# too since it uses the same `complete` builtin, but this isn't tested
-# under plain zsh.
+# list.
 am_complete_xg () {
   local f="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
   [ -r "$f" ] || return 0
@@ -673,4 +671,19 @@ am_complete_xg () {
 }
 if [ -n "$BASH_VERSION" ]; then
   complete -F am_complete_xg xg xs xd
+fi
+
+# Same completion for plain zsh (no bashcompinit): needs the zsh
+# completion system already loaded (`autoload -Uz compinit && compinit`
+# in .zshrc) -- if compdef isn't defined yet, this silently does nothing,
+# same as the bash guard above.
+if [ -n "$ZSH_VERSION" ] && typeset -f compdef >/dev/null 2>&1; then
+  am_complete_xg_zsh () {
+    local f="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
+    [ -r "$f" ] || return 0
+    local -a hashes
+    hashes=($(jq -r '.session_id[0:6]' "$f" 2>/dev/null))
+    compadd -- "${hashes[@]}"
+  }
+  compdef am_complete_xg_zsh xg xs xd
 fi
