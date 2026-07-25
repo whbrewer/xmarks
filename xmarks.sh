@@ -12,13 +12,15 @@
 #                          cleared on un-star.
 #   xg [hash]              cd to its dir and resume the session (any
 #                          session's HASH from xl, starred or not)
-#   xl [-l|--long] [-s|--starred] [-r|--reverse] [-n N] [pattern]  every
-#                          session, oldest to newest (latest at the
-#                          bottom); each row's HASH is an xg shortcut,
-#                          starred rows get a * beside it. Last 20 by
-#                          default; -s limits to starred sessions, a
-#                          pattern filters (either lifts the cap); -n N
-#                          overrides the count shown either way; -l
+#   xl [-l|--long] [-s|--starred] [-r|--reverse] [-a|--all] [-n N] [pattern]
+#                          every session, oldest to newest (latest at
+#                          the bottom); each row's HASH is an xg
+#                          shortcut, starred rows get a * beside it.
+#                          Last 20 by default ($XMARKS_XL_LIMIT overrides
+#                          that default); -s limits to starred sessions,
+#                          a pattern filters (either lifts the cap); -a
+#                          shows every session, uncapped; -n N overrides
+#                          the count shown either way; -l
 #                          shows a git-log-style paragraph per session
 #                          instead of the oneline table, newest session
 #                          first (like real `git log`, unlike the
@@ -492,12 +494,13 @@ xg () {
 xl () {
   am_migrate
   local SESSIONS_FILE="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
-  local long=0 starred_only=0 reverse=0 limit=20 limit_set=0
+  local long=0 starred_only=0 reverse=0 limit="${XMARKS_XL_LIMIT:-20}" limit_set=0 show_all=0
   while :; do
     case "${1:-}" in
       -l|--long|--full) long=1; shift ;;
       -s|--starred) starred_only=1; shift ;;
       -r|--reverse) reverse=1; shift ;;
+      -a|--all) show_all=1; shift ;;
       -n) limit="${2:-}"
           case "$limit" in
             ''|*[!0-9]*) echo "xl: -n requires a number" >&2; return 1 ;;
@@ -515,29 +518,34 @@ xl () {
   # command gets plain text either way. Every colored field is wrapped
   # the same way on every row (even "-"), so the constant escape-code
   # overhead cancels out in column -t's width math instead of skewing it.
-  local c_hash="" c_mark="" c_dim="" c_warn="" c_reset=""
+  local c_hash="" c_mark="" c_dim="" c_warn="" c_reset="" c_invert=""
   if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
     c_hash=$'\033[33m'   # yellow, like git's commit hash
     c_mark=$'\033[36m'   # cyan, for the starred indicator
     c_dim=$'\033[2m'
     c_warn=$'\033[1;31m'
     c_reset=$'\033[0m'
+    c_invert=$'\033[7m'  # swapped fg/bg, for the table header row
   fi
   # -s (or a pattern) is already a small, deliberate subset -- no cap,
   # unless -n overrides it explicitly. Otherwise last 20 (or -n's count),
-  # oldest to newest (latest at the bottom).
+  # oldest to newest (latest at the bottom). -a lifts the cap outright.
   local pattern="${1:-}"
   local use_cap=1
-  [ "$limit_set" = 0 ] && { [ "$starred_only" = 1 ] || [ -n "$pattern" ]; } && use_cap=0
-  local rows
-  rows="$(
+  [ "$limit_set" = 0 ] && { [ "$starred_only" = 1 ] || [ -n "$pattern" ] || [ "$show_all" = 1 ]; } && use_cap=0
+  local filtered
+  filtered="$(
     { if [ "$starred_only" = 1 ]; then jq -c 'select(.starred == true)' "$SESSIONS_FILE"
       else cat "$SESSIONS_FILE"; fi; } \
     | tac \
-    | { [ -n "$pattern" ] && grep -i -- "$pattern" || cat; } \
-    | { [ "$use_cap" = 1 ] && head -n "$limit" || cat; } \
-    | tac
+    | { [ -n "$pattern" ] && grep -i -- "$pattern" || cat; }
   )"
+  # Total (pre-cap) count, so the compact view can tell the user how much
+  # more is available beyond the default 20-row window.
+  local total=0
+  [ -n "$filtered" ] && total="$(printf '%s\n' "$filtered" | wc -l | tr -d ' ')"
+  local rows
+  rows="$(printf '%s\n' "$filtered" | { [ "$use_cap" = 1 ] && head -n "$limit" || cat; } | tac)"
   # AGENT is only worth a column/line when the listed sessions actually mix
   # tools; with everything on claude (the common case) it's a no-op value.
   local show_tool=0
@@ -623,7 +631,28 @@ xl () {
           done
       # -c 1000: column -t silently drops trailing columns that don't fit
       # the terminal width instead of wrapping.
-      } | column -t -s"$(printf '\t')" -c 1000
+      } | column -t -s"$(printf '\t')" -c 1000 \
+      | { # Invert the header row (fg/bg swapped) after column -t has
+          # already aligned everything -- done here, on the finished
+          # text, so it can't disturb the byte-count-matching column -t
+          # needs to align the HASH column on BSD/macOS (see above).
+          # $c_reset ends the row's own color runs partway through, so
+          # each one is followed by a fresh $c_invert to keep the swap
+          # going until the row's real end.
+          if [ -n "$c_invert" ]; then
+            local header_line
+            IFS= read -r header_line
+            header_line="${header_line//"$c_reset"/$c_reset$c_invert}"
+            printf '%s%s%s\n' "$c_invert" "$header_line" "$c_reset"
+          fi
+          cat
+        }
+      # Cue that the default 20-row cap is hiding older sessions -- easy
+      # to forget it's there, so spell out the count and how to see more.
+      if [ "$use_cap" = 1 ] && [ "$total" -gt "$limit" ]; then
+        printf '%sshowing last %s of %s sessions -- xl -a, xl -n %s, or xl <pattern> for more%s\n' \
+          "$c_dim" "$limit" "$total" "$total" "$c_reset"
+      fi
     } | am_page
   fi
 }
