@@ -233,12 +233,19 @@ am_truncate () {
   fi
 }
 
+am_date_fmt () {
+  # $1 = a stored "YYYY-MM-DD HH:MM" date, $2 = output format. GNU `date -d`
+  # parses that directly; BSD/macOS date has no -d and needs the input
+  # format spelled out via -j -f instead.
+  date -d "$1" "$2" 2>/dev/null || date -j -f '%Y-%m-%d %H:%M' "$1" "$2" 2>/dev/null
+}
+
 am_relative_date () {
   # $1 = a stored "YYYY-MM-DD HH:MM" date, for xl's compact table (xl -l
-  # keeps the full timestamp). Falls back to the raw string if `date -d`
-  # can't parse it (e.g. a hand-edited row).
+  # keeps the full timestamp). Falls back to the raw string if it can't be
+  # parsed (e.g. a hand-edited row).
   local then_epoch now_epoch diff
-  then_epoch="$(date -d "$1" +%s 2>/dev/null)" || { printf '%s' "$1"; return; }
+  then_epoch="$(am_date_fmt "$1" +%s)" || { printf '%s' "$1"; return; }
   now_epoch="$(date +%s)"
   diff=$((now_epoch - then_epoch))
   if [ "$diff" -lt 60 ]; then
@@ -249,10 +256,10 @@ am_relative_date () {
     printf '%dh' "$((diff / 3600))"
   elif [ "$diff" -lt 604800 ]; then
     printf '%dd' "$((diff / 86400))"
-  elif [ "$(date -d "$1" +%Y)" = "$(date +%Y)" ]; then
-    date -d "$1" '+%b %d'
+  elif [ "$(am_date_fmt "$1" +%Y)" = "$(date +%Y)" ]; then
+    am_date_fmt "$1" '+%b %d'
   else
-    date -d "$1" '+%b %d %Y'
+    am_date_fmt "$1" '+%b %d %Y'
   fi
 }
 
@@ -547,10 +554,16 @@ xl () {
       done
     } | am_page
   else
+    # AGE is right-justified by hand below: `column -t -R` is a GNU
+    # (util-linux) extension, not available in BSD/macOS column.
+    local agewidth=3 w
+    while IFS= read -r w; do
+      [ "${#w}" -gt "$agewidth" ] && agewidth="${#w}"
+    done <<<"$(printf '%s\n' "$rows" | jq -r '.date' | while IFS= read -r w; do am_relative_date "$w"; printf '\n'; done)"
     { { if [ "$show_tool" = 1 ]; then
-          printf 'HASH\tAGENT\tDIR\tSUMMARY\tAGE\n'
+          printf 'HASH\tAGENT\tDIR\tSUMMARY\t%*s\n' "$agewidth" AGE
         else
-          printf 'HASH\tDIR\tSUMMARY\tAGE\n'
+          printf 'HASH\tDIR\tSUMMARY\t%*s\n' "$agewidth" AGE
         fi
         local maxlen="${XMARKS_NOTE_MAXLEN:-52}"
         printf '%s\n' "$rows" | { [ "$flip" = 1 ] && tac || cat; } \
@@ -558,7 +571,7 @@ xl () {
                   (.starred // false), (.tool // "")] | join("\u001f")' \
         | while read -r date sid dir home reason summary note starred tool; do
             dir="$(am_display_dir "$dir" 0)"
-            date="$(am_relative_date "$date")"
+            date="$(printf '%*s' "$agewidth" "$(am_relative_date "$date")")"
             local shown="${note:-$summary}"; shown="${shown:--}"
             # Starred rows get a * beside the hash, in the same color the
             # old MARK column used, instead of a separate column.
@@ -573,9 +586,8 @@ xl () {
             fi
           done
       # -c 1000: column -t silently drops trailing columns that don't fit
-      # the terminal width instead of wrapping. -R right-aligns AGE (last
-      # column, 5th with AGENT shown, else 4th) so its digits line up.
-      } | column -t -s"$(printf '\t')" -c 1000 -R "$([ "$show_tool" = 1 ] && echo 5 || echo 4)"
+      # the terminal width instead of wrapping.
+      } | column -t -s"$(printf '\t')" -c 1000
     } | am_page
   fi
 }
