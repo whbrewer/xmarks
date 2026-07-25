@@ -574,9 +574,15 @@ xl () {
             date="$(printf '%*s' "$agewidth" "$(am_relative_date "$date")")"
             local shown="${note:-$summary}"; shown="${shown:--}"
             # Starred rows get a * beside the hash, in the same color the
-            # old MARK column used, instead of a separate column.
-            local hashfield="${c_hash}${sid:0:6}${c_reset}"
-            [ "$starred" = true ] && hashfield="${hashfield}${c_mark}*${c_reset}"
+            # old MARK column used, instead of a separate column. The mark
+            # segment (star or space) is always emitted, colored either
+            # way, so every row carries the same escape-code byte count --
+            # otherwise column -t's raw-byte width math (it doesn't know
+            # ANSI codes aren't visible) misjudges the HASH column whenever
+            # starred and unstarred rows are mixed.
+            local mark=" "
+            [ "$starred" = true ] && mark="*"
+            local hashfield="${c_hash}${sid:0:6}${c_reset}${c_mark}${mark}${c_reset}"
             if [ "$show_tool" = 1 ]; then
               printf '%s\t%s\t%s\t%s\t%s\n' \
                 "$hashfield" "${tool:-claude}" "$dir" "$(am_truncate "$shown" "$maxlen")" "$date"
