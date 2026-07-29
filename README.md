@@ -80,6 +80,16 @@ xf [-n N] [-r] <pattern>  # search every session's actual transcript --
                       # to match against clean prompt text instead of raw
                       # JSON bytes (so a hit inside a tool-call payload or
                       # assistant reply doesn't count).
+xj [-n N] [-r] [pattern]  # list background jobs (Bash calls run with
+                      # run_in_background: true) across every session,
+                      # oldest first -- for "I kicked this off last night,
+                      # which session was it in?" without needing to
+                      # remember any keyword. One row per job (a session
+                      # can start several); same HASH/star conventions as
+                      # `xl`/`xf`. A pattern filters by substring against
+                      # the command. Needs the PostToolUse hook (below) --
+                      # it's what populates the job list in the first
+                      # place.
 ```
 
 The best way to star a session is from *inside* it:
@@ -159,7 +169,10 @@ basename, shortens SUMMARY to keep things narrow (preferring the
 manual note over the auto-summary when a session has one), and trails
 with an AGE column (`3h`, `2d`, falling back to `Jul 20` or `Jul 20
 2025` past a week — kubectl's `AGE` convention) instead of a full
-timestamp. `xl -l`/
+timestamp, plus a PROMPTS column: how many real user prompts that
+session had (a cheap count the SessionEnd hook takes from the
+transcript alongside the summary — `-` for older rows recorded before
+this existed). `xl -l`/
 `--long` is `git log`-style instead — one paragraph block per session,
 newest first (like real `git log`, the reverse of the oneline table's
 oldest-first order), with the full session id, account, full path, the
@@ -171,7 +184,7 @@ in use — `xl -r` puts the newest session at the top of the table,
 first. Like git, both views color the
 hash (and mark) and page through `$PAGER`/`less` when run at a terminal —
 plain, unpaged text otherwise (piping to a file or another command), and
-`NO_COLOR=1` turns colors off. `make uninstall-hook` removes both hooks.
+`NO_COLOR=1` turns colors off. `make uninstall-hook` removes all three hooks.
 
 The SessionEnd hook itself always returns in well under a second: it
 writes the heuristic summary synchronously, then — if an LLM summary is
@@ -182,6 +195,21 @@ killed if they run too long; earlier versions called `claude -p` inline
 and could be cancelled outright (losing the update) if that call stalled
 — e.g. from a spend-limit block. Now a stalled or failed LLM call just
 leaves the heuristic summary in place; the hook itself never waits on it.
+
+## Background job tracking
+
+`make install-hook` also registers a `PostToolUse` hook, matched to just
+the `Bash` tool so it's a no-op for every other tool call. It fires after
+every Bash call and, when that call was made with `run_in_background:
+true`, appends a row (`date`, `session_id`, `dir`, `command`) to
+`~/.xmarks/jobs.jsonl` (override with `$XMARKS_JOBS`) — a foreground
+command is never logged. This is for "I kicked something off last night
+across four or five sessions, which one was it?": browse the log with
+`xj` (see Usage above), which resumes into the right session the same way
+`xl`/`xf` do — no need to remember any wording, since the hook already
+recorded it as it happened. Like the SessionEnd hook, this always returns
+immediately (PostToolUse fires after the tool result is already back with
+Claude, so there's nothing to block).
 
 ## Multiple accounts and tools
 

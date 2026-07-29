@@ -42,6 +42,9 @@ detail="$(printf '%s\n' "$raw" | awk '
   name="$(jq -r '.name // empty' <<<"${old:-null}" 2>/dev/null)"
   note="$(jq -r '.note // empty' <<<"${old:-null}" 2>/dev/null)"
   tool="$(jq -r '.tool // "claude"' <<<"${old:-null}" 2>/dev/null)"
+  # Not this script's field to compute (it never re-reads the transcript) --
+  # carry forward whatever xmarks-sessionend already wrote moments earlier.
+  prompts="$(jq -r '.prompts // 0' <<<"${old:-null}" 2>/dev/null)"
   # Preserve the row's original date -- this patch can land long after the
   # session actually ended (e.g. a laptop suspended right after xmarks-
   # sessionend launched this job, so the 45s timeout never ticked and the
@@ -53,11 +56,12 @@ detail="$(printf '%s\n' "$raw" | awk '
     [ -f "$sessions" ] && jq -c --arg s "$sid" 'select(.session_id != $s)' "$sessions"
     jq -nc --arg date "$date" --arg sid "$sid" --arg dir "$cwd" \
       --arg home "$home" --arg tool "$tool" --arg reason "$reason" --arg summary "$summary" \
-      --arg detail "$detail" \
+      --arg detail "$detail" --argjson prompts "${prompts:-0}" \
       --argjson starred "${starred:-false}" --arg name "$name" --arg note "$note" \
       '{date: $date, session_id: $sid, dir: $dir, home: $home, tool: $tool,
         reason: $reason, summary: $summary,
         detail: (if $detail == "" then null else $detail end),
+        prompts: $prompts,
         starred: $starred,
         name: (if $name == "" then null else $name end),
         note: (if $note == "" then null else $note end)}'

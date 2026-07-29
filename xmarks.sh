@@ -599,18 +599,19 @@ xl () {
       local hash_header="HASH"
       [ -n "$c_hash" ] && hash_header="${c_hash}$(printf '%-6s' HASH)${c_reset}${c_mark} ${c_reset}"
       { if [ "$show_tool" = 1 ]; then
-          printf '%s\tAGENT\tDIR\tSUMMARY\t%*s\n' "$hash_header" "$agewidth" AGE
+          printf '%s\tAGENT\tDIR\tSUMMARY\tPROMPTS\t%*s\n' "$hash_header" "$agewidth" AGE
         else
-          printf '%s\tDIR\tSUMMARY\t%*s\n' "$hash_header" "$agewidth" AGE
+          printf '%s\tDIR\tSUMMARY\tPROMPTS\t%*s\n' "$hash_header" "$agewidth" AGE
         fi
         local maxlen="${XMARKS_NOTE_MAXLEN:-52}"
         printf '%s\n' "$rows" | { [ "$flip" = 1 ] && tac || cat; } \
         | jq -r '[.date, .session_id, .dir, .home, (.reason // ""), (.summary // ""), (.note // ""),
-                  (.starred // false), (.tool // "")] | join("\u001f")' \
-        | while read -r date sid dir home reason summary note starred tool; do
+                  (.starred // false), (.tool // ""), (.prompts // "")] | join("\u001f")' \
+        | while read -r date sid dir home reason summary note starred tool prompts; do
             dir="$(am_display_dir "$dir" 0)"
             date="$(printf '%*s' "$agewidth" "$(am_relative_date "$date")")"
             local shown="${note:-$summary}"; shown="${shown:--}"
+            prompts="${prompts:--}"
             # Starred rows get a * beside the hash, in the same color the
             # old MARK column used, instead of a separate column. The mark
             # segment (star or space) is always emitted, colored either
@@ -622,11 +623,11 @@ xl () {
             [ "$starred" = true ] && mark="*"
             local hashfield="${c_hash}${sid:0:6}${c_reset}${c_mark}${mark}${c_reset}"
             if [ "$show_tool" = 1 ]; then
-              printf '%s\t%s\t%s\t%s\t%s\n' \
-                "$hashfield" "${tool:-claude}" "$dir" "$(am_truncate "$shown" "$maxlen")" "$date"
+              printf '%s\t%s\t%s\t%s\t%s\t%s\n' \
+                "$hashfield" "${tool:-claude}" "$dir" "$(am_truncate "$shown" "$maxlen")" "$prompts" "$date"
             else
-              printf '%s\t%s\t%s\t%s\n' \
-                "$hashfield" "$dir" "$(am_truncate "$shown" "$maxlen")" "$date"
+              printf '%s\t%s\t%s\t%s\t%s\n' \
+                "$hashfield" "$dir" "$(am_truncate "$shown" "$maxlen")" "$prompts" "$date"
             fi
           done
       # -c 1000: column -t silently drops trailing columns that don't fit
@@ -821,6 +822,97 @@ xf () {
     if [ "$limit_set" = 1 ] && [ "$total" -gt "$limit" ]; then
       printf '%sshowing last %s of %s matching sessions -- xf -n %s '"'"'%s'"'"' for more%s\n' \
         "$c_dim" "$limit" "$total" "$total" "$pattern" "$c_reset"
+    fi
+  } | am_page
+}
+
+# xj [-n N] [-r] [pattern]: list background jobs (Bash calls made with
+# run_in_background: true) across every session, oldest first -- for "I
+# kicked this off last night, which session was it in?" without needing to
+# remember any keyword. One row per job (a session can start several).
+# Requires the PostToolUse hook (make install-hook) -- it's what populates
+# jobs.jsonl in the first place.
+xj () {
+  am_migrate
+  local reverse=0 limit="${XMARKS_XJ_LIMIT:-20}" limit_set=0
+  while :; do
+    case "${1:-}" in
+      -r|--reverse) reverse=1; shift ;;
+      -n) limit="${2:-}"
+          case "$limit" in
+            ''|*[!0-9]*) echo "xj: -n requires a number" >&2; return 1 ;;
+          esac
+          limit_set=1; shift 2 ;;
+      --) shift; break ;;
+      -*) echo "xj: unknown option: $1" >&2; return 1 ;;
+      *) break ;;
+    esac
+  done
+  local pattern="${1:-}"
+
+  local jobs="${XMARKS_JOBS:-$HOME/.xmarks/jobs.jsonl}"
+  [ -s "$jobs" ] || {
+    echo "xj: no background jobs recorded yet -- install the PostToolUse hook: make install-hook" >&2
+    return 1
+  }
+
+  local c_hash="" c_mark="" c_dim="" c_reset="" c_invert=""
+  if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    c_hash=$'\033[33m'
+    c_mark=$'\033[36m'
+    c_dim=$'\033[2m'
+    c_reset=$'\033[0m'
+    c_invert=$'\033[7m'
+  fi
+
+  local use_cap=1
+  [ "$limit_set" = 0 ] && [ -n "$pattern" ] && use_cap=0
+  local filtered
+  filtered="$(cat "$jobs" | tac | { [ -n "$pattern" ] && grep -i -- "$pattern" || cat; })"
+  local total=0
+  [ -n "$filtered" ] && total="$(printf '%s\n' "$filtered" | wc -l | tr -d ' ')"
+  local rows
+  rows="$(printf '%s\n' "$filtered" | { [ "$use_cap" = 1 ] && head -n "$limit" || cat; } | tac)"
+  [ -n "$rows" ] || { echo "xj: no match for '$pattern'" >&2; return 1; }
+  [ "$reverse" = 1 ] && rows="$(printf '%s\n' "$rows" | tac)"
+
+  # Starred sessions get the same * marker xl gives them.
+  local SESSIONS_FILE="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
+  local starred_sids=""
+  [ -s "$SESSIONS_FILE" ] && starred_sids="$(jq -r 'select(.starred == true) | .session_id' "$SESSIONS_FILE" 2>/dev/null)"
+
+  local agewidth=3 w
+  while IFS= read -r w; do
+    [ "${#w}" -gt "$agewidth" ] && agewidth="${#w}"
+  done <<<"$(printf '%s\n' "$rows" | jq -r '.date' | while IFS= read -r w; do am_relative_date "$w"; printf '\n'; done)"
+
+  {
+    local hash_header="HASH"
+    [ -n "$c_hash" ] && hash_header="${c_hash}$(printf '%-6s' HASH)${c_reset}${c_mark} ${c_reset}"
+    local maxlen="${XMARKS_NOTE_MAXLEN:-52}"
+    { printf '%s\tDIR\tCOMMAND\t%*s\n' "$hash_header" "$agewidth" AGE
+      printf '%s\n' "$rows" \
+      | jq -r '[.date, .session_id, .dir, (.command | gsub("[\n\r\t]"; " "))] | join("")' \
+      | while IFS=$'\x1f' read -r date sid dir command; do
+          dir="$(am_display_dir "$dir" 0)"
+          local age; age="$(printf '%*s' "$agewidth" "$(am_relative_date "$date")")"
+          local mark=" "
+          printf '%s\n' "$starred_sids" | grep -qxF -- "$sid" && mark="*"
+          local hashfield="${c_hash}${sid:0:6}${c_reset}${c_mark}${mark}${c_reset}"
+          printf '%s\t%s\t%s\t%s\n' "$hashfield" "$dir" "$(am_truncate "$command" "$maxlen")" "$age"
+        done
+    } | column -t -s"$(printf '\t')" -c 1000 \
+    | { if [ -n "$c_invert" ]; then
+          local header_line
+          IFS= read -r header_line
+          header_line="${header_line//"$c_reset"/$c_reset$c_invert}"
+          printf '%s%s%s\n' "$c_invert" "$header_line" "$c_reset"
+        fi
+        cat
+      }
+    if [ "$use_cap" = 1 ] && [ "$total" -gt "$limit" ]; then
+      printf '%sshowing last %s of %s background jobs -- xj -n %s for more%s\n' \
+        "$c_dim" "$limit" "$total" "$total" "$c_reset"
     fi
   } | am_page
 }

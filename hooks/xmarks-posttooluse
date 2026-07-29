@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# xmarks PostToolUse hook (registered with a "Bash" matcher, so this only
+# ever fires for Bash calls) — logs every background job (`run_in_background:
+# true`) kicked off from a Claude Code session to its own file, so a later
+# `xj` can answer "which session did I start that in?" without needing to
+# remember any keyword to search for. Append-only: a session can kick off
+# more than one background job, and each gets its own row.
+#
+# Non-blocking by design (PostToolUse fires after the tool result is
+# already back with Claude) and cheap -- one jq parse of the hook's own
+# stdin, no transcript read.
+
+[ -n "$XMARKS_IN_HOOK" ] && exit 0
+
+IN="$(cat)"
+run_bg="$(jq -r '.tool_input.run_in_background // false' <<<"$IN" 2>/dev/null)"
+[ "$run_bg" = true ] || exit 0
+
+sid="$(jq -r '.session_id // empty' <<<"$IN")"
+tp="$(jq -r '.transcript_path // empty' <<<"$IN")"
+cwd="$(jq -r '.cwd // empty' <<<"$IN")"
+command="$(jq -r '.tool_input.command // empty' <<<"$IN")"
+description="$(jq -r '.tool_input.description // empty' <<<"$IN")"
+task_id="$(jq -r '.tool_response.task_id // empty' <<<"$IN")"
+[ -n "$sid" ] && [ -n "$command" ] || exit 0
+home="${tp%/projects/*}"
+
+jobs="${XMARKS_JOBS:-$HOME/.xmarks/jobs.jsonl}"
+mkdir -p "$(dirname "$jobs")" 2>/dev/null
+
+(
+  flock -w 5 200 || true
+  jq -nc --arg date "$(date '+%F %H:%M')" --arg sid "$sid" --arg dir "$cwd" \
+    --arg home "$home" --arg command "$command" --arg description "$description" \
+    --arg task_id "$task_id" \
+    '{date: $date, session_id: $sid, dir: $dir, home: $home,
+      command: $command,
+      description: (if $description == "" then null else $description end),
+      task_id: (if $task_id == "" then null else $task_id end)}' \
+    >> "$jobs"
+) 200>"$jobs.lock"

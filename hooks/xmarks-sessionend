@@ -40,6 +40,14 @@ user_and_assistant_text () {
     | sed 's/^[[:space:]]*//' | grep -v -e '^<' -e '^$'
 }
 
+# Number of real user prompts in this session -- how many times the user
+# actually typed something, not counting subagent/sidechain turns. Cheap
+# even on large transcripts (a jq streaming pass, no slurp).
+prompt_count () {
+  jq -r 'select(.type == "user" and .isSidechain != true) | .type' "$tp" 2>/dev/null \
+    | wc -l | tr -d ' '
+}
+
 # Replaces any existing row for this session id (flock'd, so a background
 # LLM update from an earlier run of this hook can't race a fresh one),
 # preserving starred/name/note/tool -- a session `xs`'d mid-conversation
@@ -62,11 +70,12 @@ write_row () {
       [ -f "$sessions" ] && jq -c --arg s "$sid" 'select(.session_id != $s)' "$sessions"
       jq -nc --arg date "$(date '+%F %H:%M')" --arg sid "$sid" --arg dir "$cwd" \
         --arg home "$home" --arg tool "$tool" --arg reason "$reason" --arg summary "$1" \
-        --arg detail "$detail" \
+        --arg detail "$detail" --argjson prompts "$(prompt_count)" \
         --argjson starred "${starred:-false}" --arg name "$name" --arg note "$note" \
         '{date: $date, session_id: $sid, dir: $dir, home: $home, tool: $tool,
           reason: $reason, summary: $summary,
           detail: (if $detail == "" then null else $detail end),
+          prompts: $prompts,
           starred: $starred,
           name: (if $name == "" then null else $name end),
           note: (if $note == "" then null else $note end)}'

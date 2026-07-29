@@ -42,7 +42,7 @@ summary="$(printf '%s' "$prompt" | tr '\t\n' '  ' | sed 's/^[[:space:]]*//' | cu
     jq -nc --arg date "$(date '+%F %H:%M')" --arg sid "$sid" --arg dir "$cwd" \
       --arg home "$home" --arg summary "$summary" \
       '{date: $date, session_id: $sid, dir: $dir, home: $home, tool: "claude",
-        reason: "in_progress", summary: $summary, starred: false,
+        reason: "in_progress", summary: $summary, prompts: 1, starred: false,
         name: null, note: null}'
   } > "$sessions.tmp" && mv "$sessions.tmp" "$sessions"
 ) 200>"$sessions.lock"

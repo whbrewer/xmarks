@@ -13,6 +13,7 @@ install:
 	ln -sf xs $(BINDIR)/xl
 	ln -sf xs $(BINDIR)/xd
 	ln -sf xs $(BINDIR)/xf
+	ln -sf xs $(BINDIR)/xj
 	@echo ''
 	@echo 'Installed to $(BINDIR).'
 	@echo 'For the full xg (one that leaves your shell in the starred session''s'
@@ -28,20 +29,24 @@ install:
 	@echo '  autoload -Uz compinit && compinit'
 
 uninstall:
-	rm -f $(BINDIR)/xmarks.sh $(BINDIR)/xs $(BINDIR)/xg $(BINDIR)/xl $(BINDIR)/xd $(BINDIR)/xf
+	rm -f $(BINDIR)/xmarks.sh $(BINDIR)/xs $(BINDIR)/xg $(BINDIR)/xl $(BINDIR)/xd $(BINDIR)/xf $(BINDIR)/xj
 
-# Register the SessionEnd and UserPromptSubmit journal hooks in every
-# ~/.claude* settings.json (backs each up to settings.json.bak first).
-# Browse the journal with xl.
+# Register the SessionEnd, UserPromptSubmit, and PostToolUse (Bash-only)
+# hooks in every ~/.claude* settings.json (backs each up to
+# settings.json.bak first). Browse the journal with xl, background jobs
+# with xj.
 install-hook:
 	install -m 755 hooks/xmarks-sessionend $(BINDIR)/xmarks-sessionend
 	install -m 755 hooks/xmarks-summarize-async $(BINDIR)/xmarks-summarize-async
 	install -m 755 hooks/xmarks-userpromptsubmit $(BINDIR)/xmarks-userpromptsubmit
+	install -m 755 hooks/xmarks-posttooluse $(BINDIR)/xmarks-posttooluse
 	@for d in $(HOME)/.claude $(HOME)/.claude-*; do \
 	  [ -d $$d ] || continue; \
 	  s=$$d/settings.json; [ -f $$s ] || echo '{}' > $$s; \
 	  cp $$s $$s.bak; \
-	  jq --arg cmd "$(BINDIR)/xmarks-sessionend" --arg cmd2 "$(BINDIR)/xmarks-userpromptsubmit" '.hooks.SessionEnd = ((.hooks.SessionEnd // []) | map(select((.hooks[0].command // "") != $$cmd))) + [{"hooks": [{"type": "command", "command": $$cmd}]}] | .hooks.UserPromptSubmit = ((.hooks.UserPromptSubmit // []) | map(select((.hooks[0].command // "") != $$cmd2))) + [{"hooks": [{"type": "command", "command": $$cmd2}]}]' \
+	  jq --arg cmd "$(BINDIR)/xmarks-sessionend" --arg cmd2 "$(BINDIR)/xmarks-userpromptsubmit" \
+	     --arg cmd3 "$(BINDIR)/xmarks-posttooluse" \
+	     '.hooks.SessionEnd = ((.hooks.SessionEnd // []) | map(select((.hooks[0].command // "") != $$cmd))) + [{"hooks": [{"type": "command", "command": $$cmd}]}] | .hooks.UserPromptSubmit = ((.hooks.UserPromptSubmit // []) | map(select((.hooks[0].command // "") != $$cmd2))) + [{"hooks": [{"type": "command", "command": $$cmd2}]}] | .hooks.PostToolUse = ((.hooks.PostToolUse // []) | map(select((.hooks[0].command // "") != $$cmd3))) + [{"matcher": "Bash", "hooks": [{"type": "command", "command": $$cmd3}]}]' \
 	    $$s.bak > $$s.new && mv $$s.new $$s && echo "hooks registered in $$s"; \
 	done
 
@@ -49,9 +54,11 @@ uninstall-hook:
 	@for d in $(HOME)/.claude $(HOME)/.claude-*; do \
 	  s=$$d/settings.json; [ -f $$s ] || continue; \
 	  cp $$s $$s.bak; \
-	  jq --arg cmd "$(BINDIR)/xmarks-sessionend" --arg cmd2 "$(BINDIR)/xmarks-userpromptsubmit" '.hooks.SessionEnd = ((.hooks.SessionEnd // []) | map(select((.hooks[0].command // "") != $$cmd))) | .hooks.UserPromptSubmit = ((.hooks.UserPromptSubmit // []) | map(select((.hooks[0].command // "") != $$cmd2)))' \
+	  jq --arg cmd "$(BINDIR)/xmarks-sessionend" --arg cmd2 "$(BINDIR)/xmarks-userpromptsubmit" \
+	     --arg cmd3 "$(BINDIR)/xmarks-posttooluse" \
+	     '.hooks.SessionEnd = ((.hooks.SessionEnd // []) | map(select((.hooks[0].command // "") != $$cmd))) | .hooks.UserPromptSubmit = ((.hooks.UserPromptSubmit // []) | map(select((.hooks[0].command // "") != $$cmd2))) | .hooks.PostToolUse = ((.hooks.PostToolUse // []) | map(select((.hooks[0].command // "") != $$cmd3)))' \
 	    $$s.bak > $$s.new && mv $$s.new $$s && echo "hooks removed from $$s"; \
 	done
-	rm -f $(BINDIR)/xmarks-sessionend $(BINDIR)/xmarks-summarize-async $(BINDIR)/xmarks-userpromptsubmit
+	rm -f $(BINDIR)/xmarks-sessionend $(BINDIR)/xmarks-summarize-async $(BINDIR)/xmarks-userpromptsubmit $(BINDIR)/xmarks-posttooluse
 
 .PHONY: install uninstall install-hook uninstall-hook
