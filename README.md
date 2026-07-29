@@ -65,6 +65,21 @@ xq                    # is this session/dir starred? (inside a session: `! xq`)
 xd <hash>             # permanently delete a session's row (asks for
                       # confirmation first). Unlike un-starring via `xs`,
                       # the row is gone from `xl` for good.
+xf [-n N] [-r] <pattern>  # search every session's actual transcript --
+                      # not just xl's summary/note/detail -- for a real
+                      # user prompt matching pattern. For "I know I asked
+                      # this somewhere, which session was it?" One row
+                      # per matching session (earliest match, oldest
+                      # first, uncapped by default, same HASH `xg` takes,
+                      # starred rows marked the same way as `xl`); a
+                      # session with more than one matching message shows
+                      # "(+N more)". -n caps the count, -r reverses the
+                      # order. Two passes under the hood: a raw grep
+                      # across every transcript file to shortlist
+                      # candidates cheaply, then a jq parse of just those
+                      # to match against clean prompt text instead of raw
+                      # JSON bytes (so a hit inside a tool-call payload or
+                      # assistant reply doesn't count).
 ```
 
 The best way to star a session is from *inside* it:

@@ -657,6 +657,174 @@ xl () {
   fi
 }
 
+# xf <pattern>: search every session's actual transcript -- not just the
+# xl summary/note/detail -- for a real user prompt matching pattern. For
+# "I know I asked this somewhere, which session was it?" when the
+# auto-summary doesn't mention it. Two passes: a cheap raw-byte grep
+# across every transcript file to shortlist candidates, then a jq parse
+# of just those candidates to pull out real user-prompt text (skipping
+# subagent/sidechain turns, the same schema am_first_msg already uses)
+# and confirm the match against clean text instead of raw JSON bytes.
+xf () {
+  am_migrate
+  local reverse=0 limit="" limit_set=0
+  while :; do
+    case "${1:-}" in
+      -r|--reverse) reverse=1; shift ;;
+      -n) limit="${2:-}"
+          case "$limit" in
+            ''|*[!0-9]*) echo "xf: -n requires a number" >&2; return 1 ;;
+          esac
+          limit_set=1; shift 2 ;;
+      --) shift; break ;;
+      -*) echo "xf: unknown option: $1" >&2; return 1 ;;
+      *) break ;;
+    esac
+  done
+  local pattern="${1:-}"
+  [ -n "$pattern" ] || { echo "usage: xf [-n N] [-r] <pattern>" >&2; return 1; }
+
+  local c_hash="" c_mark="" c_dim="" c_reset="" c_invert=""
+  if [ -t 1 ] && [ -z "${NO_COLOR:-}" ]; then
+    c_hash=$'\033[33m'
+    c_mark=$'\033[36m'
+    c_dim=$'\033[2m'
+    c_reset=$'\033[0m'
+    c_invert=$'\033[7m'
+  fi
+
+  # Every transcript file across every claude/codex home, tagged with the
+  # home dir and tool it came from -- needed later for the AGENT column
+  # and to know which schema to parse it with.
+  local file_index
+  file_index="$(
+    { am_claude_dirs | while IFS= read -r d; do
+        find "$d/projects" -name '*.jsonl' 2>/dev/null \
+          | while IFS= read -r f; do printf '%s\x1f%s\x1f%s\n' "$d" claude "$f"; done
+      done
+      am_codex_homes | while IFS= read -r d; do
+        find "$d/sessions" -name '*.jsonl' 2>/dev/null \
+          | while IFS= read -r f; do printf '%s\x1f%s\x1f%s\n' "$d" codex "$f"; done
+      done
+    }
+  )"
+  [ -n "$file_index" ] || { echo "xf: no session transcripts found" >&2; return 1; }
+
+  # Pass 1: cheap raw-byte grep across every file, just to shortlist which
+  # ones are even worth a jq parse -- most won't match at all. No xargs
+  # -d (a GNU-only flag) so this stays portable to BSD/macOS grep.
+  local candidates
+  candidates="$(
+    printf '%s\n' "$file_index" | while IFS=$'\x1f' read -r home tool f; do
+      grep -qil -- "$pattern" "$f" 2>/dev/null && printf '%s\x1f%s\x1f%s\n' "$home" "$tool" "$f"
+    done
+  )"
+  [ -n "$candidates" ] || { echo "xf: no match for '$pattern'" >&2; return 1; }
+
+  # Pass 2: parse just the candidates and pull out real user-prompt text.
+  # Newlines are flattened so each hit is exactly one physical output
+  # line -- raw prompt text, unlike xl's metadata fields, routinely
+  # contains them.
+  local hits
+  hits="$(
+    printf '%s\n' "$candidates" | while IFS=$'\x1f' read -r home tool f; do
+      if [ "$tool" = codex ]; then
+        local sid cwd
+        sid="$(head -1 "$f" | jq -r '.payload.session_id // empty' 2>/dev/null)"
+        cwd="$(head -1 "$f" | jq -r '.payload.cwd // empty' 2>/dev/null)"
+        jq -r --arg sid "$sid" --arg cwd "$cwd" --arg home "$home" --arg tool "$tool" '
+          select(.type == "event_msg" and .payload.type == "user_message")
+          | [.timestamp, $sid, $cwd, $home, $tool,
+             ((.payload.message // "") | gsub("[\n\r\t]"; " "))]
+          | join("")' "$f" 2>/dev/null
+      else
+        jq -r --arg home "$home" --arg tool "$tool" '
+          select(.type == "user" and .isSidechain != true)
+          | [.timestamp, .sessionId, .cwd, $home, $tool,
+             ((.message.content
+               | if type == "string" then .
+                 else (map(select(.type == "text") | .text) | join(" ")) end)
+              | gsub("[\n\r\t]"; " "))]
+          | join("")' "$f" 2>/dev/null
+      fi
+    done | grep -i -- "$pattern"
+  )"
+  [ -n "$hits" ] || { echo "xf: no match for '$pattern'" >&2; return 1; }
+
+  # One row per session: earliest matching message (truncated for
+  # display) plus how many messages in that session matched -- a
+  # follow-up rephrasing counts too, instead of spamming one row each.
+  local grouped
+  grouped="$(
+    printf '%s\n' "$hits" | jq -R -s -r '
+      split("\n") | map(select(length > 0) | split(""))
+      | map({ts:.[0], sid:.[1], cwd:.[2], home:.[3], tool:.[4], text:.[5]})
+      | group_by(.sid)
+      | map(sort_by(.ts) as $g | $g[0] + {count: ($g | length)})
+      | sort_by(.ts)
+      | .[] | [.ts, .sid, .cwd, .home, .tool, (.count | tostring), .text] | join("")
+    '
+  )"
+
+  local show_tool=0
+  [ "$(printf '%s\n' "$hits" | cut -d $'\x1f' -f5 | sort -u | wc -l | tr -d ' ')" -gt 1 ] && show_tool=1
+
+  # Starred sessions get the same * marker xl gives them.
+  local SESSIONS_FILE="${XMARKS_SESSIONS:-$HOME/.xmarks/sessions.jsonl}"
+  local starred_sids=""
+  [ -s "$SESSIONS_FILE" ] && starred_sids="$(jq -r 'select(.starred == true) | .session_id' "$SESSIONS_FILE" 2>/dev/null)"
+
+  local total; total="$(printf '%s\n' "$grouped" | wc -l | tr -d ' ')"
+  local rows="$grouped"
+  [ "$limit_set" = 1 ] && rows="$(printf '%s\n' "$grouped" | tail -n "$limit")"
+  [ "$reverse" = 1 ] && rows="$(printf '%s\n' "$rows" | tac)"
+
+  local agewidth=3 w
+  while IFS= read -r w; do
+    [ "${#w}" -gt "$agewidth" ] && agewidth="${#w}"
+  done <<<"$(printf '%s\n' "$rows" | cut -d $'\x1f' -f1 | while IFS= read -r ts; do am_relative_date "${ts:0:10} ${ts:11:5}"; printf '\n'; done)"
+
+  {
+    local hash_header="HASH"
+    [ -n "$c_hash" ] && hash_header="${c_hash}$(printf '%-6s' HASH)${c_reset}${c_mark} ${c_reset}"
+    local maxlen="${XMARKS_NOTE_MAXLEN:-52}"
+    { if [ "$show_tool" = 1 ]; then
+        printf '%s\tAGENT\tDIR\tMATCH\t%*s\n' "$hash_header" "$agewidth" AGE
+      else
+        printf '%s\tDIR\tMATCH\t%*s\n' "$hash_header" "$agewidth" AGE
+      fi
+      printf '%s\n' "$rows" | while IFS=$'\x1f' read -r ts sid cwd home tool count text; do
+        local dir; dir="$(am_display_dir "$cwd" 0)"
+        local age; age="$(printf '%*s' "$agewidth" "$(am_relative_date "${ts:0:10} ${ts:11:5}")")"
+        local shown="$text"
+        [ "$count" -gt 1 ] && shown="$shown (+$((count - 1)) more)"
+        local mark=" "
+        printf '%s\n' "$starred_sids" | grep -qxF -- "$sid" && mark="*"
+        local hashfield="${c_hash}${sid:0:6}${c_reset}${c_mark}${mark}${c_reset}"
+        if [ "$show_tool" = 1 ]; then
+          printf '%s\t%s\t%s\t%s\t%s\n' \
+            "$hashfield" "$tool" "$dir" "$(am_truncate "$shown" "$maxlen")" "$age"
+        else
+          printf '%s\t%s\t%s\t%s\n' \
+            "$hashfield" "$dir" "$(am_truncate "$shown" "$maxlen")" "$age"
+        fi
+      done
+    } | column -t -s"$(printf '\t')" -c 1000 \
+    | { if [ -n "$c_invert" ]; then
+          local header_line
+          IFS= read -r header_line
+          header_line="${header_line//"$c_reset"/$c_reset$c_invert}"
+          printf '%s%s%s\n' "$c_invert" "$header_line" "$c_reset"
+        fi
+        cat
+      }
+    if [ "$limit_set" = 1 ] && [ "$total" -gt "$limit" ]; then
+      printf '%sshowing last %s of %s matching sessions -- xf -n %s '"'"'%s'"'"' for more%s\n' \
+        "$c_dim" "$limit" "$total" "$total" "$pattern" "$c_reset"
+    fi
+  } | am_page
+}
+
 # xq: is this session saved? Inside a Claude Code session (`! xq`) checks
 # that exact session; outside, shows any starred sessions for the current
 # directory.

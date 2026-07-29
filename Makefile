@@ -12,6 +12,7 @@ install:
 	ln -sf xs $(BINDIR)/xg
 	ln -sf xs $(BINDIR)/xl
 	ln -sf xs $(BINDIR)/xd
+	ln -sf xs $(BINDIR)/xf
 	@echo ''
 	@echo 'Installed to $(BINDIR).'
 	@echo 'For the full xg (one that leaves your shell in the starred session''s'
@@ -27,7 +28,7 @@ install:
 	@echo '  autoload -Uz compinit && compinit'
 
 uninstall:
-	rm -f $(BINDIR)/xmarks.sh $(BINDIR)/xs $(BINDIR)/xg $(BINDIR)/xl $(BINDIR)/xd
+	rm -f $(BINDIR)/xmarks.sh $(BINDIR)/xs $(BINDIR)/xg $(BINDIR)/xl $(BINDIR)/xd $(BINDIR)/xf
 
 # Register the SessionEnd and UserPromptSubmit journal hooks in every
 # ~/.claude* settings.json (backs each up to settings.json.bak first).
