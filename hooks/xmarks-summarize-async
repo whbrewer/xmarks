@@ -25,6 +25,11 @@ fi
 
 update_detail () {
   old="$([ -f "$sessions" ] && jq -c --arg s "$sid" 'select(.session_id == $s)' "$sessions" | tail -1)"
+  # If the row is gone, xmarks-sessionend's synchronous write (which always
+  # lands before this async job even starts) must have been removed since --
+  # almost certainly `xd`, run while this job was still waiting on the LLM
+  # call. Respect that deletion instead of resurrecting the row from scratch.
+  [ -n "$old" ] || exit 0
   starred="$(jq -r '.starred // false' <<<"${old:-null}" 2>/dev/null)"
   name="$(jq -r '.name // empty' <<<"${old:-null}" 2>/dev/null)"
   note="$(jq -r '.note // empty' <<<"${old:-null}" 2>/dev/null)"
