@@ -102,18 +102,37 @@ write_row () {
 first="$(user_and_assistant_text | head -1 | tr '\t' ' ' | cut -c1-100)"
 write_row "${first:--}"
 
-if [ "${XMARKS_AUTOSUMMARY:-llm}" = llm ] && command -v claude >/dev/null 2>&1; then
-  excerpt="$(user_and_assistant_text | tail -40 | cut -c1-400)"
-  helper="$(dirname "$(readlink -f "$0")")/xmarks-summarize-async"
-  if [ -n "$excerpt" ] && [ -x "$helper" ]; then
-    # Use setsid on Linux, nohup on macOS to fully detach the async job.
-    if command -v setsid >/dev/null 2>&1; then
-      setsid "$helper" "$sid" "$sessions" "$cwd" "$home" "$reason" \
-        <<<"$excerpt" >/dev/null 2>&1 &
-      disown
-    else
-      nohup "$helper" "$sid" "$sessions" "$cwd" "$home" "$reason" \
-        <<<"$excerpt" >/dev/null 2>&1 &
-    fi
+if [ "${XMARKS_AUTOSUMMARY:-llm}" = llm ]; then
+  # Extract Claude's final assistant message from the transcript as the detail.
+  # The recap is already computed by Claude and shown to the user; we're just
+  # pulling it from the transcript instead of regenerating it.
+  detail="$(jq -r 'select(.type == "assistant") | select(.isSidechain != true)
+                   | .message.content
+                   | if type == "string" then .
+                     else (map(select(.type == "text") | .text) | join(" ")) end' \
+              "$tp" 2>/dev/null | tail -1 | tr '\t' ' ' | cut -c1-700)"
+  if [ -n "$detail" ]; then
+    # Patch the detail into the sessions file (preserve everything else).
+    (
+      flock -w 5 200 || true
+      old="$([ -f "$sessions" ] && jq -c --arg s "$sid" 'select(.session_id == $s)' "$sessions" | tail -1)"
+      {
+        [ -f "$sessions" ] && jq -c --arg s "$sid" 'select(.session_id != $s)' "$sessions"
+        jq -nc --arg date "$(jq -r '.date' <<<"${old:-null}" 2>/dev/null || echo "$(date '+%F %H:%M')")" \
+          --arg sid "$sid" --arg dir "$cwd" --arg home "$home" --arg tool "$(jq -r '.tool // "claude"' <<<"${old:-null}" 2>/dev/null)" \
+          --arg reason "$reason" --arg summary "$(jq -r '.summary // empty' <<<"${old:-null}" 2>/dev/null)" \
+          --arg detail "$detail" --argjson prompts "$(jq -r '.prompts // 0' <<<"${old:-null}" 2>/dev/null)" \
+          --argjson starred "$(jq -r '.starred // false' <<<"${old:-null}" 2>/dev/null)" \
+          --arg name "$(jq -r '.name // empty' <<<"${old:-null}" 2>/dev/null)" \
+          --arg note "$(jq -r '.note // empty' <<<"${old:-null}" 2>/dev/null)" \
+          '{date: $date, session_id: $sid, dir: $dir, home: $home, tool: $tool,
+            reason: $reason, summary: $summary,
+            detail: (if $detail == "" then null else $detail end),
+            prompts: $prompts,
+            starred: $starred,
+            name: (if $name == "" then null else $name end),
+            note: (if $note == "" then null else $note end)}'
+      } > "$sessions.tmp" && mv "$sessions.tmp" "$sessions"
+    ) 200>"$sessions.lock"
   fi
 fi
