@@ -8,12 +8,10 @@
 sid="$1" sessions="$2" cwd="$3" home="$4" reason="$5"
 excerpt="$(cat)"
 
-# Ask Claude for a natural recap paragraph (no rigid formatting constraints).
-# This lets Claude write a genuine recap of what happened instead of being
-# forced into a rigid format it won't follow.
-detail="$(cd "${TMPDIR:-/tmp}" && printf '%s\n' "$excerpt" \
+# Ask Claude for a natural recap paragraph from the session excerpt.
+# Prepend context marker so Claude knows the input is the session content.
+detail="$(cd "${TMPDIR:-/tmp}" && printf 'Session transcript:\n%s\n\nWrite a concise recap paragraph of this session. Describe what was done, the approach, and the outcome. Keep it to 2-4 sentences, specific and technical. Respond with only the paragraph, no preamble.\n' "$excerpt" \
   | XMARKS_IN_HOOK=1 timeout 45 claude -p --model "${XMARKS_SUMMARY_MODEL:-haiku}" \
-      'Write a brief paragraph recap of this coding session. What was done, what decisions were made, what was the outcome? Be concise (2-4 sentences) but specific about the actual work.' \
       2>/dev/null | tr '\n' ' ' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | cut -c1-700)"
 
 [ -n "$detail" ] || exit 0
