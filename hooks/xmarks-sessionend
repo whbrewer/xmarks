@@ -70,7 +70,9 @@ prompt_count () {
 # must not lose its mark when the exit summary comes in.
 write_row () {
   (
-    flock -w 5 200 || true
+    if command -v flock >/dev/null 2>&1; then
+      flock -w 5 200 || true
+    fi
     local old starred name note tool detail
     old="$([ -f "$sessions" ] && jq -c --arg s "$sid" 'select(.session_id == $s)' "$sessions" | tail -1)"
     starred="$(jq -r '.starred // false' <<<"${old:-null}" 2>/dev/null)"
@@ -96,7 +98,30 @@ write_row () {
           name: (if $name == "" then null else $name end),
           note: (if $note == "" then null else $note end)}'
     } > "$sessions.tmp" && mv "$sessions.tmp" "$sessions"
-  ) 200>"$sessions.lock"
+  ) 200>"$sessions.lock" 2>/dev/null
+}
+
+# Helper function to atomically update the sessions file with new detail.
+update_session () {
+  local detail="$1"
+  old="$([ -f "$sessions" ] && jq -c --arg s "$sid" 'select(.session_id == $s)' "$sessions" | tail -1)"
+  {
+    [ -f "$sessions" ] && jq -c --arg s "$sid" 'select(.session_id != $s)' "$sessions"
+    jq -nc --arg date "$(jq -r '.date' <<<"${old:-null}" 2>/dev/null || echo "$(date '+%F %H:%M')")" \
+      --arg sid "$sid" --arg dir "$cwd" --arg home "$home" --arg tool "$(jq -r '.tool // "claude"' <<<"${old:-null}" 2>/dev/null)" \
+      --arg reason "$reason" --arg summary "$(jq -r '.summary // empty' <<<"${old:-null}" 2>/dev/null)" \
+      --arg detail "$detail" --argjson prompts "$(jq -r '.prompts // 0' <<<"${old:-null}" 2>/dev/null)" \
+      --argjson starred "$(jq -r '.starred // false' <<<"${old:-null}" 2>/dev/null)" \
+      --arg name "$(jq -r '.name // empty' <<<"${old:-null}" 2>/dev/null)" \
+      --arg note "$(jq -r '.note // empty' <<<"${old:-null}" 2>/dev/null)" \
+      '{date: $date, session_id: $sid, dir: $dir, home: $home, tool: $tool,
+        reason: $reason, summary: $summary,
+        detail: (if $detail == "" then null else $detail end),
+        prompts: $prompts,
+        starred: $starred,
+        name: (if $name == "" then null else $name end),
+        note: (if $note == "" then null else $note end)}'
+  } > "$sessions.tmp" && mv "$sessions.tmp" "$sessions"
 }
 
 first="$(user_and_assistant_text | head -1 | tr '\t' ' ' | cut -c1-100)"
@@ -113,26 +138,11 @@ if [ "${XMARKS_AUTOSUMMARY:-llm}" = llm ]; then
               "$tp" 2>/dev/null | tail -1 | tr '\t' ' ' | cut -c1-700)"
   if [ -n "$detail" ]; then
     # Patch the detail into the sessions file (preserve everything else).
-    (
-      flock -w 5 200 || true
-      old="$([ -f "$sessions" ] && jq -c --arg s "$sid" 'select(.session_id == $s)' "$sessions" | tail -1)"
-      {
-        [ -f "$sessions" ] && jq -c --arg s "$sid" 'select(.session_id != $s)' "$sessions"
-        jq -nc --arg date "$(jq -r '.date' <<<"${old:-null}" 2>/dev/null || echo "$(date '+%F %H:%M')")" \
-          --arg sid "$sid" --arg dir "$cwd" --arg home "$home" --arg tool "$(jq -r '.tool // "claude"' <<<"${old:-null}" 2>/dev/null)" \
-          --arg reason "$reason" --arg summary "$(jq -r '.summary // empty' <<<"${old:-null}" 2>/dev/null)" \
-          --arg detail "$detail" --argjson prompts "$(jq -r '.prompts // 0' <<<"${old:-null}" 2>/dev/null)" \
-          --argjson starred "$(jq -r '.starred // false' <<<"${old:-null}" 2>/dev/null)" \
-          --arg name "$(jq -r '.name // empty' <<<"${old:-null}" 2>/dev/null)" \
-          --arg note "$(jq -r '.note // empty' <<<"${old:-null}" 2>/dev/null)" \
-          '{date: $date, session_id: $sid, dir: $dir, home: $home, tool: $tool,
-            reason: $reason, summary: $summary,
-            detail: (if $detail == "" then null else $detail end),
-            prompts: $prompts,
-            starred: $starred,
-            name: (if $name == "" then null else $name end),
-            note: (if $note == "" then null else $note end)}'
-      } > "$sessions.tmp" && mv "$sessions.tmp" "$sessions"
-    ) 200>"$sessions.lock"
+    # Use flock if available (Linux), otherwise rely on atomic mv (macOS/BSD).
+    if command -v flock >/dev/null 2>&1; then
+      ( flock -w 5 200; update_session "$detail" ) 200>"$sessions.lock"
+    else
+      update_session "$detail"
+    fi
   fi
 fi
