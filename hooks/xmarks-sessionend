@@ -18,8 +18,10 @@
 
 # Reuse the migration logic from xmarks.sh, installed alongside this hook
 # (defines am_migrate; harmless to source here even though this shell also
-# picks up xs/xg/etc. unused).
-. "$(dirname "$(readlink -f "$0")")/xmarks.sh" 2>/dev/null
+# picks up xs/xg/etc. unused). Use readlink -f on Linux, fall back to readlink
+# on macOS where -f may not work as expected.
+hook_dir="$(dirname "$(readlink -f "$0" 2>/dev/null || readlink "$0" 2>/dev/null || echo "$0")")"
+. "$hook_dir/xmarks.sh" 2>/dev/null
 am_migrate 2>/dev/null
 
 IN="$(cat)"
@@ -104,10 +106,18 @@ write_row "${first:--}"
 
 if [ "${XMARKS_AUTOSUMMARY:-llm}" = llm ] && command -v claude >/dev/null 2>&1; then
   excerpt="$(user_and_assistant_text | tail -40 | cut -c1-400)"
-  helper="$(dirname "$(readlink -f "$0")")/xmarks-summarize-async"
+  helper="$hook_dir/xmarks-summarize-async"
   if [ -n "$excerpt" ] && [ -x "$helper" ]; then
-    setsid "$helper" "$sid" "$sessions" "$cwd" "$home" "$reason" \
-      <<<"$excerpt" >/dev/null 2>&1 &
-    disown
+    # setsid (Linux) fully detaches the process; on macOS use nohup & to orphan it.
+    if command -v setsid >/dev/null 2>&1; then
+      setsid "$helper" "$sid" "$sessions" "$cwd" "$home" "$reason" \
+        <<<"$excerpt" >/dev/null 2>&1 &
+      disown
+    else
+      # macOS: nohup makes the process immune to parent exit, & backgrounds it.
+      nohup "$helper" "$sid" "$sessions" "$cwd" "$home" "$reason" \
+        <<<"$excerpt" >/dev/null 2>&1 &
+      disown 2>/dev/null || true
+    fi
   fi
 fi
