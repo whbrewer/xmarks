@@ -1,57 +1,41 @@
 #!/usr/bin/env bash
-# Background helper spawned (detached, via setsid) by xmarks-sessionend:
-# asks an LLM for a short summary + a longer commit-message-style writeup
-# of one session, then patches its row in place. Runs independent of the
-# hook and of Claude Code entirely, so it's free to take whatever time an
-# LLM call needs without risking "hook cancelled". Any failure here — no
-# network, spend limit reached, `claude` missing, timeout — exits
-# quietly; the heuristic summary xmarks-sessionend already wrote stands
-# unchanged.
-#
-# XMARKS_SUMMARY_MODEL picks the model (any --model value `claude -p`
-# accepts); default is haiku, the cheapest/fastest tier, since this runs
-# once per session purely to produce a short blurb.
+# Background helper spawned (detached) by xmarks-sessionend:
+# asks Claude for a natural recap of the session, then patches it into
+# the sessions.jsonl file. Runs independent of the hook and Claude Code,
+# so it can take whatever time the LLM call needs. Any failure exits
+# quietly; the heuristic summary already written by the hook stands.
 
 sid="$1" sessions="$2" cwd="$3" home="$4" reason="$5"
 excerpt="$(cat)"
 
-# Two outputs from one call: SUMMARY is the short one-liner shown in the
-# xl table columns (kept genuinely short so it's never cut off); DETAIL
-# is a longer commit-message-style paragraph (what happened, key
-# decisions, outcome), only ever shown via `xl -l` since it can't fit a
-# table row. The awk join folds a DETAIL that wraps onto further lines
-# (the model doesn't always obey "one line") into a single stored line.
-raw="$(cd "${TMPDIR:-/tmp}" && printf '%s\n' "$excerpt" \
+# Ask Claude for a natural recap paragraph (no rigid formatting constraints).
+# This lets Claude write a genuine recap of what happened instead of being
+# forced into a rigid format it won't follow.
+detail="$(cd "${TMPDIR:-/tmp}" && printf '%s\n' "$excerpt" \
   | XMARKS_IN_HOOK=1 timeout 45 claude -p --model "${XMARKS_SUMMARY_MODEL:-haiku}" \
-      'Summarize this coding-agent session. Output exactly two lines, nothing else, no markdown:
-SUMMARY: <at most 12 words, no preamble>
-DETAIL: <a commit-message-style paragraph, 2-4 sentences, covering what was done, key decisions/why, and the outcome>' \
-      2>/dev/null)"
-summary="$(printf '%s\n' "$raw" | sed -n 's/^SUMMARY:[[:space:]]*//p' | head -1 \
-  | tr '\t' ' ' | cut -c1-100)"
-detail="$(printf '%s\n' "$raw" | awk '
-  /^DETAIL:/ { sub(/^DETAIL:[[:space:]]*/, ""); printf "%s", $0; f=1; next }
-  f { printf " %s", $0 }
-' | tr '\t' ' ' | cut -c1-700)"
-[ -n "$summary" ] || exit 0
+      'Write a brief paragraph recap of this coding session. What was done, what decisions were made, what was the outcome? Be concise (2-4 sentences) but specific about the actual work.' \
+      2>/dev/null | tr '\n' ' ' | sed 's/^[[:space:]]*//; s/[[:space:]]*$//' | cut -c1-700)"
 
-(
-  flock -w 5 200 || exit 0
+[ -n "$detail" ] || exit 0
+
+# Patch the detail into the sessions file (preserve everything else).
+# Use flock if available (Linux), otherwise rely on atomic mv (macOS/BSD).
+lock_cmd=""
+if command -v flock >/dev/null 2>&1; then
+  lock_cmd="flock -w 5 200"
+fi
+
+update_detail () {
   old="$([ -f "$sessions" ] && jq -c --arg s "$sid" 'select(.session_id == $s)' "$sessions" | tail -1)"
   starred="$(jq -r '.starred // false' <<<"${old:-null}" 2>/dev/null)"
   name="$(jq -r '.name // empty' <<<"${old:-null}" 2>/dev/null)"
   note="$(jq -r '.note // empty' <<<"${old:-null}" 2>/dev/null)"
   tool="$(jq -r '.tool // "claude"' <<<"${old:-null}" 2>/dev/null)"
-  # Not this script's field to compute (it never re-reads the transcript) --
-  # carry forward whatever xmarks-sessionend already wrote moments earlier.
   prompts="$(jq -r '.prompts // 0' <<<"${old:-null}" 2>/dev/null)"
-  # Preserve the row's original date -- this patch can land long after the
-  # session actually ended (e.g. a laptop suspended right after xmarks-
-  # sessionend launched this job, so the 45s timeout never ticked and the
-  # claude -p call only ran once the machine woke back up) and must not
-  # make a stale session look like it happened just now.
   date="$(jq -r '.date // empty' <<<"${old:-null}" 2>/dev/null)"
   date="${date:-$(date '+%F %H:%M')}"
+  reason="$(jq -r '.reason // "exit"' <<<"${old:-null}" 2>/dev/null)"
+  summary="$(jq -r '.summary // empty' <<<"${old:-null}" 2>/dev/null)"
   {
     [ -f "$sessions" ] && jq -c --arg s "$sid" 'select(.session_id != $s)' "$sessions"
     jq -nc --arg date "$date" --arg sid "$sid" --arg dir "$cwd" \
@@ -66,4 +50,10 @@ detail="$(printf '%s\n' "$raw" | awk '
         name: (if $name == "" then null else $name end),
         note: (if $note == "" then null else $note end)}'
   } > "$sessions.tmp" && mv "$sessions.tmp" "$sessions"
-) 200>"$sessions.lock"
+}
+
+if [ -n "$lock_cmd" ]; then
+  ( $lock_cmd; update_detail ) 200>"$sessions.lock" 2>/dev/null
+else
+  update_detail
+fi

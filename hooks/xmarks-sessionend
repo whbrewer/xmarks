@@ -127,22 +127,27 @@ update_session () {
 first="$(user_and_assistant_text | head -1 | tr '\t' ' ' | cut -c1-100)"
 write_row "${first:--}"
 
-if [ "${XMARKS_AUTOSUMMARY:-llm}" = llm ]; then
-  # Extract Claude's final assistant message from the transcript as the detail.
-  # The recap is already computed by Claude and shown to the user; we're just
-  # pulling it from the transcript instead of regenerating it.
-  detail="$(jq -r 'select(.type == "assistant") | select(.isSidechain != true)
-                   | .message.content
+if [ "${XMARKS_AUTOSUMMARY:-llm}" = llm ] && command -v claude >/dev/null 2>&1; then
+  # Extract recent user and assistant messages from the transcript to build context for recap.
+  excerpt="$(jq -r 'select(.type == "user" or .type == "assistant")
+                   | select(.isSidechain != true) | .message.content
                    | if type == "string" then .
                      else (map(select(.type == "text") | .text) | join(" ")) end' \
-              "$tp" 2>/dev/null | tail -1 | tr '\t' ' ' | cut -c1-700)"
-  if [ -n "$detail" ]; then
-    # Patch the detail into the sessions file (preserve everything else).
-    # Use flock if available (Linux), otherwise rely on atomic mv (macOS/BSD).
-    if command -v flock >/dev/null 2>&1; then
-      ( flock -w 5 200; update_session "$detail" ) 200>"$sessions.lock"
-    else
-      update_session "$detail"
+              "$tp" 2>/dev/null | tail -40 | cut -c1-2000 | tr '\n' ' ')"
+
+  if [ -n "$excerpt" ]; then
+    # Launch async background job to ask Claude for a recap.
+    helper="$(dirname "$(readlink -f "$0")")/xmarks-summarize-async"
+    if [ -x "$helper" ]; then
+      # Use nohup on macOS, setsid on Linux for proper detachment.
+      if command -v setsid >/dev/null 2>&1; then
+        setsid "$helper" "$sid" "$sessions" "$cwd" "$home" "$reason" \
+          <<<"$excerpt" >/dev/null 2>&1 &
+        disown
+      else
+        nohup "$helper" "$sid" "$sessions" "$cwd" "$home" "$reason" \
+          <<<"$excerpt" >/dev/null 2>&1 &
+      fi
     fi
   fi
 fi
