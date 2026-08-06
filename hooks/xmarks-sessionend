@@ -106,8 +106,14 @@ if [ "${XMARKS_AUTOSUMMARY:-llm}" = llm ] && command -v claude >/dev/null 2>&1; 
   excerpt="$(user_and_assistant_text | tail -40 | cut -c1-400)"
   helper="$(dirname "$(readlink -f "$0")")/xmarks-summarize-async"
   if [ -n "$excerpt" ] && [ -x "$helper" ]; then
-    setsid "$helper" "$sid" "$sessions" "$cwd" "$home" "$reason" \
-      <<<"$excerpt" >/dev/null 2>&1 &
-    disown
+    # Use setsid on Linux, nohup on macOS to fully detach the async job.
+    if command -v setsid >/dev/null 2>&1; then
+      setsid "$helper" "$sid" "$sessions" "$cwd" "$home" "$reason" \
+        <<<"$excerpt" >/dev/null 2>&1 &
+      disown
+    else
+      nohup "$helper" "$sid" "$sessions" "$cwd" "$home" "$reason" \
+        <<<"$excerpt" >/dev/null 2>&1 &
+    fi
   fi
 fi
